@@ -10,13 +10,23 @@ const bodySchema = z.object({ initData: z.string().min(1) });
 async function issueSession(app: FastifyInstance, telegramUserId: bigint) {
   const user = await prisma.user.findUnique({
     where: { telegramUserId },
-    include: { regions: { include: { region: true } } },
+    include: {
+      regions: { include: { region: true } },
+      serviceCenters: { include: { serviceCenter: true } },
+    },
   });
   if (!user?.active)
     throw new AppError(403, 'ACCESS_DENIED', 'Your Telegram account is not authorized.');
   const regions = user.regions.map((item) => item.region.code);
+  const serviceCenters = user.serviceCenters.map((item) => item.serviceCenter.code);
   const token = app.jwt.sign(
-    { sub: user.id, telegramUserId: user.telegramUserId.toString(), role: user.role, regions },
+    {
+      sub: user.id,
+      telegramUserId: user.telegramUserId.toString(),
+      role: user.role,
+      regions,
+      serviceCenters,
+    },
     { expiresIn: '8h' },
   );
   return {
@@ -29,6 +39,7 @@ async function issueSession(app: FastifyInstance, telegramUserId: bigint) {
       username: user.username,
       role: user.role,
       regions,
+      serviceCenters,
     },
   };
 }

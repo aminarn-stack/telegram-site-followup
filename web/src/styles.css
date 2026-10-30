@@ -233,6 +233,23 @@ small {
   display: grid;
   gap: 0.75rem;
 }
+
+.scope-grid .metric {
+  align-items: flex-start;
+}
+
+.scope-grid .metric > strong {
+  font-size: 1.05rem;
+}
+
+.link-button {
+  background: transparent;
+  color: var(--accent);
+  padding: 0;
+  margin-top: 0.5rem;
+  min-height: auto;
+  text-align: left;
+}
 .status-group {
   background: var(--surface);
   border: 1px solid #dae3e7;
@@ -330,6 +347,35 @@ label {
   gap: 0.35rem;
   font-size: 0.85rem;
   font-weight: 700;
+}
+.sc-picker {
+  border: 1px solid #bacbd3;
+  border-radius: 9px;
+  padding: 0.75rem;
+}
+.sc-picker legend {
+  padding: 0 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.check-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.check-option {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  background: #edf3f5;
+}
+.check-option input {
+  width: auto;
+  margin: 0;
 }
 .back {
   display: inline-block;

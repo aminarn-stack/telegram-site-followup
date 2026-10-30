@@ -76,11 +76,13 @@ export async function importRoutes(app: FastifyInstance, config: Config) {
             rowNumber: row.rowNumber,
             siteIdText: row.siteIdText || null,
             regionText: row.region || null,
+            serviceCenterText: row.serviceCenter || null,
             siteTypeText: row.siteType,
             sectorText: row.sectorAddition,
             normalizedData: {
               siteIdText: row.siteIdText,
               region: row.region,
+              serviceCenter: row.serviceCenter,
               siteType: row.siteType,
               sectorAddition: row.sectorAddition,
             },
@@ -160,13 +162,19 @@ export async function importRoutes(app: FastifyInstance, config: Config) {
         const data = row.normalizedData as {
           siteIdText: string;
           region: string;
+          serviceCenter: string;
           siteType: 'NORMAL' | 'SHARED';
           sectorAddition: 'YES' | 'NO';
         };
         const region = await tx.region.upsert({
           where: { code: data.region },
           update: { active: true },
-          create: { code: data.region, name: data.region },
+          create: { code: data.region },
+        });
+        const serviceCenter = await tx.serviceCenter.upsert({
+          where: { code: data.serviceCenter },
+          update: { active: true },
+          create: { code: data.serviceCenter },
         });
         const existing = await tx.site.findUnique({
           where: { siteIdText: data.siteIdText },
@@ -184,16 +192,18 @@ export async function importRoutes(app: FastifyInstance, config: Config) {
                 classificationChanged && !hasProgress
                   ? {
                       regionId: region.id,
+                      serviceCenterId: serviceCenter.id,
                       siteType: data.siteType,
                       sectorAddition: data.sectorAddition,
                       active: true,
                     }
-                  : { regionId: region.id, active: true },
+                  : { regionId: region.id, serviceCenterId: serviceCenter.id, active: true },
             })
           : await tx.site.create({
               data: {
                 siteIdText: data.siteIdText,
                 regionId: region.id,
+                serviceCenterId: serviceCenter.id,
                 siteType: data.siteType,
                 sectorAddition: data.sectorAddition,
               },
@@ -258,27 +268,40 @@ export async function importRoutes(app: FastifyInstance, config: Config) {
           requestId: request.id,
         },
       });
-      const chats = await tx.botChat.findMany({ where: { active: true, importSummaries: true } });
+      const chats = await tx.botChat.findMany({
+        where: { active: true, importSummaries: true, serviceCenters: { some: {} } },
+        include: { serviceCenters: { include: { serviceCenter: true } } },
+      });
       const normalized = batch.rows.map(
-        (row) => row.normalizedData as { region: string; siteType: string; sectorAddition: string },
+        (row) =>
+          row.normalizedData as {
+            region: string;
+            serviceCenter: string;
+            siteType: string;
+            sectorAddition: string;
+          },
       );
       const countBy = (values: string[]) =>
         values.reduce<Record<string, number>>(
           (counts, value) => ({ ...counts, [value]: (counts[value] ?? 0) + 1 }),
           {},
         );
-      const scenarioCounts = countBy(
-        normalized.map((item) => `${item.siteType}_${item.sectorAddition}`),
-      );
-      const regionCounts = countBy(normalized.map((item) => item.region));
       for (const chat of chats) {
+        const chatServiceCenters = chat.serviceCenters.map((item) => item.serviceCenter.code);
+        const scopedRows = normalized.filter((item) =>
+          chatServiceCenters.includes(item.serviceCenter),
+        );
+        if (!scopedRows.length) continue;
         const payload: Prisma.InputJsonValue = {
           batchId: batch.id,
           reportingWeek: batch.reportingWeek.toISOString(),
-          acceptedRows: batch.acceptedRows,
-          rejectedRows: batch.rejectedRows,
-          scenarioCounts,
-          regionCounts,
+          acceptedRows: scopedRows.length,
+          rejectedRows: 0,
+          scenarioCounts: countBy(
+            scopedRows.map((item) => `${item.siteType}_${item.sectorAddition}`),
+          ),
+          serviceCenterCounts: countBy(scopedRows.map((item) => item.serviceCenter)),
+          regionCounts: countBy(scopedRows.map((item) => item.region)),
         };
         await tx.notification.create({
           data: {

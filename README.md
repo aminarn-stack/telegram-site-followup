@@ -1,4 +1,4 @@
-# Telegram Site Follow Up
+# Telegram Site Follow-up
 
 Production-oriented MVP for weekly site follow-up through a Telegram Mini App and bot. The API and PostgreSQL database are the system of record. Workflow prerequisites, conditional permission handling, escalation state, authorization, and audit creation are enforced on the server.
 
@@ -89,13 +89,40 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d '{"url":"https://your-domain.example/api/telegram/webhook","secret_token":"YOUR_WEBHOOK_SECRET","allowed_updates":["message","callback_query"]}'
 ```
 
-5. Seed the first administrator with `DEFAULT_ADMIN_TELEGRAM_ID`, then use Administration to add users, region access, and the team group chat ID.
-6. Register `/start`, `/open`, `/summary`, `/remind`, `/export`, and `/help` through BotFather. The
-   `/export` command sends an Excel workbook containing the current site summary and detailed
-   status of every workflow step the requesting user is authorized to view. The `/remind` command
-   immediately sends actionable and blocked-site counts for the requesting user's permitted
-   regions. Scheduled reminders continue to use each Telegram group's configured minute, hour,
-   and weekday schedule.
+5. Seed the first administrator with `DEFAULT_ADMIN_TELEGRAM_ID`, then use Administration to add
+   users, SC access, and every team/SC Telegram group. Each group must be assigned at least one
+   service center; unassigned groups receive no site data.
+6. Register `/start`, `/open`, `/summary`, `/remind`, `/export`, `/flowexport`, and `/help` through
+   BotFather. `/export` sends the current site summary and status of every workflow step.
+   `/flowexport` sends a second workbook ordered by SC, Region, and Site ID with each site's current
+   steps, statuses, answers, and directly dependent next steps. `/summary`, `/remind`, scheduled
+   reminders, import summaries, blocker alerts, resolutions, and completion messages use the same
+   group-to-SC scope. Region remains an independent reporting and filtering field. Administrators
+   can use a private bot chat or the web dashboard for an all-SC view and export; the workbook
+   includes an overview sheet by team/SC.
+
+### Workflow licensing branch
+
+- Every flow includes **License required** immediately after **BP issuance by RMPS**.
+- `Yes` opens **License issuance**, with `Done` and `Not Done` answers.
+- `Requested - No` marks **License issuance** as not applicable.
+- Existing downstream steps keep their original BP-based prerequisites and do not wait for the
+  license branch.
+
+### Team / SC isolation
+
+- Include both `Region` and `SC` for every site in the weekly import. One SC may own sites in any
+  number of regions.
+- Region and SC codes are created automatically from committed imports. Administration uses the
+  imported SC list for user and Telegram-group access; codes cannot be added or typed manually.
+- Assign each contributor or viewer only the service centers they support.
+- In **Administration → Telegram groups and reminders**, assign each Telegram chat ID to its team/SC
+  codes. A group without an assigned SC is deliberately blocked from receiving site data.
+- A non-admin command is limited to the intersection of the user's SCs and the group's SCs.
+- An admin command issued inside a configured group uses that group's scope. The same command in a
+  private chat includes all SCs.
+- The admin dashboard shows combined totals, a breakdown per team/SC, an all-SC export, and a
+  separate export for each team/SC.
 
 At the end of a reporting week, an administrator can use **Administration → Archive current
 plan**. Archiving preserves workflows and audit history while clearing all site IDs from the

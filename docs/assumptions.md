@@ -6,7 +6,7 @@
 - Reporting week is stored as the submitted ISO date. The UI defaults to the current date; the administrator selects the team’s intended week boundary.
 - Import classification aliases are conservative and case-insensitive. Additional aliases are stored as configuration data and can be extended without changing historical rows.
 - Reappearing sites retain their active workflow. A changed classification with recorded progress creates a review flag. Administrator approval starts a new cycle using the latest active template; it does not rewrite history.
-- The documented “Available port checking and FPA check” answer rule is implemented for both separate steps using the same OK/NOK classification.
+- The documented “Available port check and FPA check” answer rule is implemented for both separate steps using the same OK/NOK classification.
 - Only the workflow engine may set `Permission` to Not Applicable. No API accepts N/A as a business answer.
 - Assignment is optional in the MVP. Region authorization remains mandatory even when no individual assignee is configured.
 - The source specifies reminder schedules but explicitly excludes broader SLA/due-date logic. The worker therefore sends schedule-based aggregate reminders and does not invent per-step deadlines.
@@ -14,7 +14,7 @@
 
 ## Source comparison
 
-The authoritative DOCX and the supporting workbook agree on all four workflow templates, step labels, ordering, prerequisites, and answers. No conflict was found. The spelling `BP isuance by RMPS` is retained exactly as required.
+All four workflow templates include the same independent license branch after BP issuance. Obvious spelling and grammar issues in user-facing workflow text are normalized in the application and existing data.
 
 ## Known limitations and external verification
 

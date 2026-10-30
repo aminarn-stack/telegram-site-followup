@@ -1,5 +1,5 @@
-Site ID,Region,Shared Site Or Normal Site,Add sector included or Not
-E2023,R1,Normal,No
-E4562,R2,Shared,No
-T5467,R3,Normal,Yes
-T6734,R4,Shared,Yes
+Site ID,Region,SC,Shared Site Or Normal Site,Add sector included or Not
+E2023,R1,AEC,Normal,No
+E4562,R2,Flipnet,Shared,No
+T5467,R3,Flipnet,Normal,Yes
+T6734,R4,AEC,Shared,Yes

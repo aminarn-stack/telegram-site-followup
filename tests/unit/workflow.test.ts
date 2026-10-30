@@ -16,10 +16,10 @@ function answer(template: TemplateDefinition, steps: StepSnapshot[], code: strin
 
 describe('seeded workflow templates', () => {
   it('routes all four scenarios to the exact documented step counts', () => {
-    expect(templateFor('NORMAL', 'NO').steps).toHaveLength(16);
-    expect(templateFor('SHARED', 'NO').steps).toHaveLength(17);
-    expect(templateFor('NORMAL', 'YES').steps).toHaveLength(17);
-    expect(templateFor('SHARED', 'YES').steps).toHaveLength(18);
+    expect(templateFor('NORMAL', 'NO').steps).toHaveLength(18);
+    expect(templateFor('SHARED', 'NO').steps).toHaveLength(19);
+    expect(templateFor('NORMAL', 'YES').steps).toHaveLength(19);
+    expect(templateFor('SHARED', 'YES').steps).toHaveLength(20);
     expect(WORKFLOW_TEMPLATES.map((item) => item.code)).toEqual([
       'NORMAL_NO_SECTOR',
       'SHARED_NO_SECTOR',
@@ -34,7 +34,7 @@ describe('seeded workflow templates', () => {
       template,
       initialStepStates(template),
       'INITIAL_ACCESS',
-      'Done-Permission no needed',
+      'Done - Permission not needed',
     );
     expect(steps.find((item) => item.code === 'PERMISSION')).toMatchObject({
       answer: null,
@@ -49,7 +49,7 @@ describe('seeded workflow templates', () => {
       template,
       initialStepStates(template),
       'INITIAL_ACCESS',
-      'Done-Permission needed',
+      'Done - Permission needed',
     );
     expect(steps.find((item) => item.code === 'PERMISSION')?.state).toBe('ACTIONABLE');
     expect(steps.find((item) => item.code === 'PRE_TSS')?.state).toBe('LOCKED');
@@ -61,7 +61,7 @@ describe('seeded workflow templates', () => {
       template,
       initialStepStates(template),
       'INITIAL_ACCESS',
-      'Done-Permission needed',
+      'Done - Permission needed',
     );
     steps = answer(template, steps, 'PERMISSION', 'Not Available');
     const calculated = recalculate(template, steps);
@@ -79,7 +79,7 @@ describe('seeded workflow templates', () => {
       template,
       initialStepStates(template),
       'INITIAL_ACCESS',
-      'Done-Permission needed',
+      'Done - Permission needed',
     );
     steps = answer(template, steps, 'PERMISSION', 'Not Available');
     steps = answer(template, steps, 'PERMISSION', 'Available');
@@ -91,7 +91,7 @@ describe('seeded workflow templates', () => {
     const template = templateFor('SHARED', 'YES');
     const snapshots = initialStepStates(template).map((item) => ({ ...item }));
     const completedAnswers: Record<string, string> = {
-      INITIAL_ACCESS: 'Done-Permission no needed',
+      INITIAL_ACCESS: 'Done - Permission not needed',
       PRE_TSS: 'Done',
       RND_SUBMISSION: 'Done',
       INSTALLATION_PLAN: 'Received',
@@ -110,6 +110,41 @@ describe('seeded workflow templates', () => {
     expect(steps.find((item) => item.code === 'CORE_REQUEST')?.state).toBe('ACTIONABLE');
   });
 
+  it('runs the optional license branch without blocking downstream steps', () => {
+    const template = templateFor('NORMAL', 'NO');
+    const snapshots = initialStepStates(template).map((item) => ({ ...item }));
+    const completedAnswers: Record<string, string> = {
+      INITIAL_ACCESS: 'Done - Permission not needed',
+      AVAILABLE_PORT: 'OK',
+      PRE_TSS: 'Done',
+      RND_SUBMISSION: 'Done',
+      INSTALLATION_PLAN: 'Received',
+      BP_REQUEST: 'Done',
+      BP_ISSUANCE: 'Done',
+    };
+    for (const item of snapshots) item.answer = completedAnswers[item.code] ?? null;
+
+    let steps = recalculate(template, snapshots).steps;
+    expect(steps.find((item) => item.code === 'LICENSE_REQUIRED')?.state).toBe('ACTIONABLE');
+    expect(steps.find((item) => item.code === 'LICENSE_ISSUANCE')?.state).toBe('LOCKED');
+    expect(steps.find((item) => item.code === 'CORE_REQUEST')?.state).toBe('ACTIONABLE');
+
+    steps = answer(template, steps, 'LICENSE_REQUIRED', 'Requested - No');
+    expect(steps.find((item) => item.code === 'LICENSE_ISSUANCE')).toMatchObject({
+      answer: null,
+      state: 'NOT_APPLICABLE',
+    });
+    expect(steps.find((item) => item.code === 'CORE_REQUEST')?.state).toBe('ACTIONABLE');
+
+    steps = answer(template, steps, 'LICENSE_REQUIRED', 'Yes');
+    expect(steps.find((item) => item.code === 'LICENSE_ISSUANCE')?.state).toBe('ACTIONABLE');
+    expect(steps.find((item) => item.code === 'CORE_REQUEST')?.state).toBe('ACTIONABLE');
+
+    steps = answer(template, steps, 'LICENSE_ISSUANCE', 'Not Done');
+    expect(steps.find((item) => item.code === 'LICENSE_ISSUANCE')?.state).toBe('BLOCKED');
+    expect(steps.find((item) => item.code === 'CORE_REQUEST')?.state).toBe('ACTIONABLE');
+  });
+
   it('completes only when every applicable step is completed or N/A (AT-11)', () => {
     const template = templateFor('NORMAL', 'NO');
     const snapshots = initialStepStates(template).map((item) => {
@@ -122,15 +157,15 @@ describe('seeded workflow templates', () => {
             'NOK',
             'Not Received',
             'Rejected',
-            'Not submitted',
-            'Not delivered',
+            'Not Submitted',
+            'Not Delivered',
           ].includes(candidate),
       );
       return {
         ...item,
         answer:
           definition.code === 'INITIAL_ACCESS'
-            ? 'Done-Permission no needed'
+            ? 'Done - Permission not needed'
             : definition.code === 'PERMISSION'
               ? null
               : (positive ?? null),
@@ -139,7 +174,7 @@ describe('seeded workflow templates', () => {
     expect(recalculate(template, snapshots).siteStatus).toBe('COMPLETED');
   });
 
-  it('keeps Site Implementation locked until every earlier branch is complete', () => {
+  it('opens Site Implementation after operational branches complete without waiting for licensing', () => {
     const template = templateFor('NORMAL', 'NO');
     const steps = initialStepStates(template);
     const implementation = steps.find((item) => item.code === 'SITE_IMPLEMENTATION');
@@ -154,16 +189,21 @@ describe('seeded workflow templates', () => {
             'Not Available',
             'NOK',
             'Not Received',
-            'Not submitted',
-            'Not delivered',
+            'Not Submitted',
+            'Not Delivered',
           ].includes(candidate),
       );
       return {
         ...item,
         answer:
           item.code === 'INITIAL_ACCESS'
-            ? 'Done-Permission no needed'
-            : item.code === 'PERMISSION' || item.code === 'SITE_IMPLEMENTATION'
+            ? 'Done - Permission not needed'
+            : [
+                  'PERMISSION',
+                  'LICENSE_REQUIRED',
+                  'LICENSE_ISSUANCE',
+                  'SITE_IMPLEMENTATION',
+                ].includes(item.code)
               ? null
               : (answer ?? null),
       };
@@ -172,6 +212,10 @@ describe('seeded workflow templates', () => {
     expect(calculated.steps.find((item) => item.code === 'SITE_IMPLEMENTATION')?.state).toBe(
       'ACTIONABLE',
     );
+    expect(calculated.steps.find((item) => item.code === 'LICENSE_REQUIRED')?.state).toBe(
+      'ACTIONABLE',
+    );
+    expect(calculated.steps.find((item) => item.code === 'LICENSE_ISSUANCE')?.state).toBe('LOCKED');
     expect(calculated.siteStatus).toBe('IN_PROGRESS');
   });
 
@@ -187,8 +231,8 @@ describe('seeded workflow templates', () => {
             'NOK',
             'Not Received',
             'Rejected',
-            'Not submitted',
-            'Not delivered',
+            'Not Submitted',
+            'Not Delivered',
             'Not Possible',
             'Ongoing',
           ].includes(candidate),
@@ -197,7 +241,7 @@ describe('seeded workflow templates', () => {
         ...item,
         answer:
           item.code === 'INITIAL_ACCESS'
-            ? 'Done-Permission no needed'
+            ? 'Done - Permission not needed'
             : item.code === 'PERMISSION'
               ? null
               : (positive ?? null),

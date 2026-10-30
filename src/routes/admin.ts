@@ -4,13 +4,17 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { actorFrom, requireRole } from '../lib/auth.js';
 import { notFound, validation } from '../lib/errors.js';
+import { archiveWeeklyPlan } from '../services/weekly-plan.js';
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/users', async (request) => {
     const actor = await actorFrom(request);
     requireRole(actor, [Role.ADMIN]);
     const users = await prisma.user.findMany({
-      include: { regions: { include: { region: true } } },
+      include: {
+        regions: { include: { region: true } },
+        serviceCenters: { include: { serviceCenter: true } },
+      },
       orderBy: { firstName: 'asc' },
     });
     return users.map((user) => ({ ...user, telegramUserId: user.telegramUserId.toString() }));
@@ -28,13 +32,10 @@ export async function adminRoutes(app: FastifyInstance) {
         role: z.nativeEnum(Role),
         active: z.boolean().default(true),
         regions: z.array(z.string()).default([]),
+        serviceCenters: z.array(z.string().min(1).max(50)).default([]),
       })
       .parse(request.body);
-    const regions = await Promise.all(
-      body.regions.map((code) =>
-        prisma.region.upsert({ where: { code }, update: {}, create: { code, name: code } }),
-      ),
-    );
+    const serviceCenters = await findExistingServiceCenters(body.serviceCenters);
     const user = await prisma.user.upsert({
       where: { telegramUserId: BigInt(body.telegramUserId) },
       update: {
@@ -43,7 +44,11 @@ export async function adminRoutes(app: FastifyInstance) {
         username: body.username ?? null,
         role: body.role,
         active: body.active,
-        regions: { deleteMany: {}, create: regions.map((region) => ({ regionId: region.id })) },
+        regions: { deleteMany: {} },
+        serviceCenters: {
+          deleteMany: {},
+          create: serviceCenters.map((serviceCenter) => ({ serviceCenterId: serviceCenter.id })),
+        },
       },
       create: {
         telegramUserId: BigInt(body.telegramUserId),
@@ -52,9 +57,14 @@ export async function adminRoutes(app: FastifyInstance) {
         username: body.username ?? null,
         role: body.role,
         active: body.active,
-        regions: { create: regions.map((region) => ({ regionId: region.id })) },
+        serviceCenters: {
+          create: serviceCenters.map((serviceCenter) => ({ serviceCenterId: serviceCenter.id })),
+        },
       },
-      include: { regions: { include: { region: true } } },
+      include: {
+        regions: { include: { region: true } },
+        serviceCenters: { include: { serviceCenter: true } },
+      },
     });
     await prisma.auditEvent.create({
       data: {
@@ -67,6 +77,7 @@ export async function adminRoutes(app: FastifyInstance) {
           role: body.role,
           active: body.active,
           regions: body.regions,
+          serviceCenters: body.serviceCenters,
         },
         requestId: request.id,
       },
@@ -80,27 +91,22 @@ export async function adminRoutes(app: FastifyInstance) {
     return prisma.region.findMany({ orderBy: { code: 'asc' } });
   });
 
-  app.post('/api/admin/regions', async (request) => {
+  app.get('/api/admin/service-centers', async (request) => {
     const actor = await actorFrom(request);
     requireRole(actor, [Role.ADMIN]);
-    const body = z
-      .object({
-        code: z.string().min(1).max(50),
-        name: z.string().min(1).max(100),
-        active: z.boolean().default(true),
-      })
-      .parse(request.body);
-    return prisma.region.upsert({
-      where: { code: body.code },
-      update: { name: body.name, active: body.active },
-      create: body,
+    return prisma.serviceCenter.findMany({
+      where: { active: true, code: { not: 'UNASSIGNED' }, sites: { some: {} } },
+      orderBy: { code: 'asc' },
     });
   });
 
   app.get('/api/admin/chats', async (request) => {
     const actor = await actorFrom(request);
     requireRole(actor, [Role.ADMIN]);
-    const chats = await prisma.botChat.findMany({ orderBy: { createdAt: 'desc' } });
+    const chats = await prisma.botChat.findMany({
+      include: { serviceCenters: { include: { serviceCenter: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
     return chats.map((chat) => ({ ...chat, telegramChatId: chat.telegramChatId.toString() }));
   });
 
@@ -118,17 +124,50 @@ export async function adminRoutes(app: FastifyInstance) {
         escalations: z.boolean().default(true),
         timezone: z.string().default('Asia/Tehran'),
         reminderSchedule: z.string().default('0 9 * * 1,3'),
+        serviceCenters: z.array(z.string().min(1).max(50)).min(1),
       })
       .parse(request.body);
+    const serviceCenters = await findExistingServiceCenters(body.serviceCenters);
     const data = {
-      ...body,
-      groupName: body.groupName ?? null,
       telegramChatId: BigInt(body.telegramChatId),
+      chatType: body.chatType,
+      groupName: body.groupName ?? null,
+      active: body.active,
+      importSummaries: body.importSummaries,
+      reminders: body.reminders,
+      escalations: body.escalations,
+      timezone: body.timezone,
+      reminderSchedule: body.reminderSchedule,
     };
     const chat = await prisma.botChat.upsert({
       where: { telegramChatId: data.telegramChatId },
-      update: data,
-      create: data,
+      update: {
+        ...data,
+        serviceCenters: {
+          deleteMany: {},
+          create: serviceCenters.map((serviceCenter) => ({ serviceCenterId: serviceCenter.id })),
+        },
+      },
+      create: {
+        ...data,
+        serviceCenters: {
+          create: serviceCenters.map((serviceCenter) => ({ serviceCenterId: serviceCenter.id })),
+        },
+      },
+      include: { serviceCenters: { include: { serviceCenter: true } } },
+    });
+    await prisma.auditEvent.create({
+      data: {
+        actorId: actor.id,
+        entityType: 'bot_chat',
+        entityId: chat.id,
+        action: 'GROUP_SCOPE_UPSERTED',
+        newValue: {
+          telegramChatId: body.telegramChatId,
+          serviceCenters: body.serviceCenters,
+        },
+        requestId: request.id,
+      },
     });
     return { ...chat, telegramChatId: chat.telegramChatId.toString() };
   });
@@ -137,46 +176,9 @@ export async function adminRoutes(app: FastifyInstance) {
     const actor = await actorFrom(request);
     requireRole(actor, [Role.ADMIN]);
     const { reason } = z.object({ reason: z.string().trim().min(3).max(500) }).parse(request.body);
-    return prisma.$transaction(async (tx) => {
-      const workflows = await tx.siteWorkflow.findMany({
-        where: { active: true },
-        select: { id: true, siteId: true },
-      });
-      const siteIds = [...new Set(workflows.map((item) => item.siteId))];
-      const archivedAt = new Date();
-      if (workflows.length) {
-        await tx.siteWorkflow.updateMany({
-          where: { id: { in: workflows.map((item) => item.id) } },
-          data: { active: false },
-        });
-        await tx.site.updateMany({
-          where: { id: { in: siteIds } },
-          data: { active: false },
-        });
-      }
-      const latestBatch = await tx.importBatch.findFirst({
-        where: { status: 'COMMITTED' },
-        orderBy: { committedAt: 'desc' },
-      });
-      await tx.auditEvent.create({
-        data: {
-          actorId: actor.id,
-          entityType: 'weekly_plan',
-          entityId: latestBatch?.id ?? 'active-plan',
-          action: 'WEEKLY_PLAN_ARCHIVED',
-          oldValue: { activeWorkflows: workflows.length, activeSites: siteIds.length },
-          newValue: { archivedAt: archivedAt.toISOString() },
-          reason,
-          requestId: request.id,
-        },
-      });
-      return {
-        archivedAt,
-        archivedWorkflows: workflows.length,
-        archivedSites: siteIds.length,
-        requestId: request.id,
-      };
-    });
+    return prisma.$transaction((tx) =>
+      archiveWeeklyPlan(tx, { actorId: actor.id, reason, requestId: request.id }),
+    );
   });
 
   app.get('/api/admin/templates', async (request) => {
@@ -348,4 +350,24 @@ export async function adminRoutes(app: FastifyInstance) {
       return { workflowId: workflow.id, requestId: request.id };
     });
   });
+}
+
+async function findExistingServiceCenters(requestedCodes: string[]) {
+  const codes = [...new Set(requestedCodes)];
+  const serviceCenters = await prisma.serviceCenter.findMany({
+    where: {
+      code: { in: codes },
+      active: true,
+      NOT: { code: 'UNASSIGNED' },
+      sites: { some: {} },
+    },
+  });
+  const existingCodes = new Set(serviceCenters.map((serviceCenter) => serviceCenter.code));
+  const missing = codes.filter((code) => !existingCodes.has(code));
+  if (missing.length) {
+    throw validation('One or more service centers do not exist in the imported site list.', {
+      serviceCenters: missing,
+    });
+  }
+  return serviceCenters;
 }

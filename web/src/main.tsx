@@ -17,7 +17,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { api, authenticate, type SessionUser } from './api';
+import { api, authenticate, download, type SessionUser } from './api';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -34,6 +34,7 @@ interface SiteListItem {
     siteType: string;
     sectorAddition: string;
     region: { code: string };
+    serviceCenter: { code: string };
     assignedUsers: { user: { id: string; firstName: string; lastName?: string } }[];
   };
   template: { code: string };
@@ -68,7 +69,7 @@ function Shell({ user, children }: { user: SessionUser; children: React.ReactNod
     <div className="shell">
       <header>
         <div>
-          <strong>Site Follow Up</strong>
+          <strong>Site Follow-up</strong>
           <small>
             {user.firstName} · {user.role}
           </small>
@@ -86,7 +87,8 @@ function Shell({ user, children }: { user: SessionUser; children: React.ReactNod
   );
 }
 
-function Dashboard() {
+function Dashboard({ user }: { user: SessionUser }) {
+  const [exportError, setExportError] = useState<string>();
   const { data, isLoading, error } = useApiQuery<{
     total: number;
     counts: Record<string, number>;
@@ -101,12 +103,21 @@ function Dashboard() {
         publicId: string;
         siteIdText: string;
         region: string;
+        serviceCenter: string;
         actionableSteps: string[];
       }[]
     >;
+    scopeBreakdown: {
+      serviceCenter: string;
+      regions: string[];
+      total: number;
+      completed: number;
+      blocked: number;
+    }[];
   }>(['dashboard'], '/api/dashboard');
   if (isLoading) return <Loading />;
   if (error || !data) return <ErrorView error={error} />;
+  const scopeBreakdown = data.scopeBreakdown ?? [];
   const cards = [
     ['Total', data.total],
     ['Not Started', data.counts.NOT_STARTED ?? 0],
@@ -131,10 +142,33 @@ function Dashboard() {
               : 'No committed import yet'}
           </p>
         </div>
-        <Link className="button" to="/sites">
-          Open sites
-        </Link>
+        <div className="actions">
+          <button
+            className="secondary"
+            onClick={() =>
+              download('/api/reports/export', 'site-status.xlsx').catch((error: Error) =>
+                setExportError(error.message),
+              )
+            }
+          >
+            Detailed status export
+          </button>
+          <button
+            className="secondary"
+            onClick={() =>
+              download('/api/reports/site-flow', 'site-current-next-steps.xlsx').catch(
+                (error: Error) => setExportError(error.message),
+              )
+            }
+          >
+            Current and next steps export
+          </button>
+          <Link className="button" to="/sites">
+            Open sites
+          </Link>
+        </div>
       </div>
+      {exportError && <p className="danger">{exportError}</p>}
       <div className="metric-grid">
         {cards.map(([label, value]) => (
           <article className="metric" key={String(label)}>
@@ -143,6 +177,44 @@ function Dashboard() {
           </article>
         ))}
       </div>
+      {user.role === 'ADMIN' && scopeBreakdown.length > 0 && (
+        <>
+          <h2>Teams / SCs</h2>
+          <div className="metric-grid scope-grid">
+            {scopeBreakdown.map((scope) => (
+              <article className="metric" key={scope.serviceCenter}>
+                <strong>{scope.serviceCenter}</strong>
+                <span>
+                  {scope.regions.join(', ')} · {scope.total} sites · {scope.completed} done ·{' '}
+                  {scope.blocked} blocked
+                </span>
+                <button
+                  className="link-button"
+                  onClick={() =>
+                    download(
+                      `/api/reports/export?serviceCenter=${encodeURIComponent(scope.serviceCenter)}`,
+                      `${scope.serviceCenter}-site-status.xlsx`,
+                    ).catch((error: Error) => setExportError(error.message))
+                  }
+                >
+                  Export this SC
+                </button>
+                <button
+                  className="link-button"
+                  onClick={() =>
+                    download(
+                      `/api/reports/site-flow?serviceCenter=${encodeURIComponent(scope.serviceCenter)}`,
+                      `${scope.serviceCenter}-current-next-steps.xlsx`,
+                    ).catch((error: Error) => setExportError(error.message))
+                  }
+                >
+                  Export SC steps
+                </button>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
       <h2>Sites by status</h2>
       <div className="status-groups">
         {statusSections.map(({ key, label }) => {
@@ -163,7 +235,7 @@ function Dashboard() {
                     <Link to={`/sites/${site.publicId}`} key={site.publicId}>
                       <strong>{site.siteIdText}</strong>
                       <small>
-                        {site.region}
+                        {site.serviceCenter} · {site.region}
                         {site.actionableSteps[0] ? ` · Next: ${site.actionableSteps[0]}` : ''}
                       </small>
                     </Link>
@@ -225,6 +297,12 @@ function Sites() {
           onChange={(event) => update('region', event.target.value)}
         />
         <input
+          aria-label="SC filter"
+          placeholder="Service center"
+          value={params.get('serviceCenter') ?? ''}
+          onChange={(event) => update('serviceCenter', event.target.value)}
+        />
+        <input
           aria-label="Import week filter"
           type="date"
           value={params.get('week') ?? ''}
@@ -267,8 +345,8 @@ function Sites() {
                 <div>
                   <strong>{item.site.siteIdText}</strong>
                   <small>
-                    {item.site.region.code} · {item.site.siteType} · Sector{' '}
-                    {item.site.sectorAddition}
+                    {item.site.serviceCenter.code} · {item.site.region.code} · {item.site.siteType}{' '}
+                    · Sector {item.site.sectorAddition}
                   </small>
                 </div>
                 <Status value={item.status} />
@@ -294,6 +372,7 @@ interface SiteDetailData {
   siteType: string;
   sectorAddition: string;
   region: { code: string };
+  serviceCenter: { code: string };
   workflow: { status: SiteStatus; template: { code: string; version: number }; steps: StepData[] };
   audit: {
     id: string;
@@ -370,7 +449,8 @@ function SiteDetail({ user }: { user: SessionUser }) {
         <div>
           <h1>{data.siteIdText}</h1>
           <p>
-            {data.region.code} · {data.siteType} · Sector {data.sectorAddition}
+            {data.serviceCenter.code} · {data.region.code} · {data.siteType} · Sector{' '}
+            {data.sectorAddition}
           </p>
         </div>
         <Status value={data.workflow.status} />
@@ -660,7 +740,7 @@ function Admin() {
       firstName: string;
       role: string;
       active: boolean;
-      regions: { region: { code: string } }[];
+      serviceCenters: { serviceCenter: { code: string } }[];
     }[]
   >(['users'], '/api/admin/users');
   const { data: chats } = useApiQuery<
@@ -670,11 +750,16 @@ function Admin() {
       groupName?: string;
       timezone: string;
       reminderSchedule: string;
+      serviceCenters: { serviceCenter: { code: string } }[];
     }[]
   >(['chats'], '/api/admin/chats');
   const { data: templates } = useApiQuery<
     { id: string; code: string; version: number; steps: unknown[] }[]
   >(['templates'], '/api/admin/templates');
+  const { data: serviceCenters } = useApiQuery<{ id: string; code: string }[]>(
+    ['service-centers'],
+    '/api/admin/service-centers',
+  );
   const saveUser = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       api('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
@@ -684,10 +769,6 @@ function Admin() {
     mutationFn: (body: Record<string, unknown>) =>
       api('/api/admin/chats', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chats'] }),
-  });
-  const saveRegion = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      api('/api/admin/regions', { method: 'POST', body: JSON.stringify(body) }),
   });
   const cloneTemplate = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
@@ -744,7 +825,7 @@ function Admin() {
         {archiveResult && <p className="success-message">{archiveResult}</p>}
         {archivePlan.error && <p className="danger">{archivePlan.error.message}</p>}
       </div>
-      <h2>Users and region access</h2>
+      <h2>Users and SC access</h2>
       <form
         className="panel form-grid"
         onSubmit={(event) => {
@@ -755,10 +836,8 @@ function Admin() {
             firstName: form.get('firstName'),
             role: form.get('role'),
             active: true,
-            regions: String(form.get('regions') ?? '')
-              .split(',')
-              .map((value) => value.trim())
-              .filter(Boolean),
+            regions: [],
+            serviceCenters: form.getAll('serviceCenters').map(String),
           });
         }}
       >
@@ -778,10 +857,7 @@ function Admin() {
             <option>VIEWER</option>
           </select>
         </label>
-        <label>
-          Regions
-          <input name="regions" placeholder="North, South" />
-        </label>
+        <ServiceCenterPicker serviceCenters={serviceCenters} />
         <button disabled={saveUser.isPending}>Add or update user</button>
         {saveUser.error && <p className="danger">{saveUser.error.message}</p>}
       </form>
@@ -792,33 +868,14 @@ function Admin() {
               <strong>{user.firstName}</strong>
               <small>
                 {user.telegramUserId} ·{' '}
-                {user.regions.map((item) => item.region.code).join(', ') || 'All/none configured'}
+                {user.serviceCenters.map((item) => item.serviceCenter.code).join(', ') ||
+                  'No SC access'}
               </small>
             </div>
             <Status value={user.active ? user.role : 'INACTIVE'} />
           </article>
         ))}
       </div>
-      <h2>Regions</h2>
-      <form
-        className="panel form-grid"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          saveRegion.mutate({ code: form.get('code'), name: form.get('name'), active: true });
-        }}
-      >
-        <label>
-          Region code
-          <input name="code" required />
-        </label>
-        <label>
-          Region name
-          <input name="name" required />
-        </label>
-        <button disabled={saveRegion.isPending}>Add or update region</button>
-        {saveRegion.error && <p className="danger">{saveRegion.error.message}</p>}
-      </form>
       <h2>Telegram groups and reminders</h2>
       <form
         className="panel form-grid"
@@ -835,6 +892,7 @@ function Admin() {
             escalations: true,
             timezone: form.get('timezone'),
             reminderSchedule: form.get('reminderSchedule'),
+            serviceCenters: form.getAll('serviceCenters').map(String),
           });
         }}
       >
@@ -854,6 +912,10 @@ function Admin() {
           Reminder schedule
           <input name="reminderSchedule" defaultValue="0 9 * * 1,3" required />
         </label>
+        <ServiceCenterPicker
+          serviceCenters={serviceCenters}
+          help="Only sites owned by the selected SCs are shown in this group’s bot results and notifications."
+        />
         <button disabled={saveChat.isPending}>Save group settings</button>
         {saveChat.error && <p className="danger">{saveChat.error.message}</p>}
       </form>
@@ -863,7 +925,9 @@ function Admin() {
             <div>
               <strong>{chat.groupName || chat.telegramChatId}</strong>
               <small>
-                {chat.timezone} · {chat.reminderSchedule}
+                {chat.serviceCenters.map((item) => item.serviceCenter.code).join(', ') ||
+                  'No SC assigned'}{' '}
+                · {chat.timezone} · {chat.reminderSchedule}
               </small>
             </div>
           </article>
@@ -892,6 +956,33 @@ function Admin() {
         ))}
       </div>
     </section>
+  );
+}
+
+function ServiceCenterPicker({
+  serviceCenters,
+  help = 'Select the SCs this user can access.',
+}: {
+  serviceCenters: { id: string; code: string }[] | undefined;
+  help?: string;
+}) {
+  return (
+    <fieldset className="sc-picker">
+      <legend>Service centers</legend>
+      {serviceCenters?.length ? (
+        <div className="check-options">
+          {serviceCenters.map((serviceCenter) => (
+            <label className="check-option" key={serviceCenter.id}>
+              <input type="checkbox" name="serviceCenters" value={serviceCenter.code} />
+              <span>{serviceCenter.code}</span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="danger">Import a site list containing SC codes first.</p>
+      )}
+      <small>{help} SCs and regions are created automatically from committed imports.</small>
+    </fieldset>
   );
 }
 
@@ -976,7 +1067,7 @@ function App() {
   return (
     <Shell user={user}>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<Dashboard user={user} />} />
         <Route path="/sites" element={<Sites />} />
         <Route path="/sites/:publicId" element={<SiteDetail user={user} />} />
         {user.role === 'ADMIN' && (

@@ -3,8 +3,50 @@ import { Role } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { actorFrom, requireRole } from '../lib/auth.js';
+import { createCurrentStatusExport } from '../services/status-export.js';
+import { createSiteFlowExport } from '../services/site-flow-export.js';
+
+function reportScope(role: Role, allowedServiceCenters: string[], requested?: string) {
+  return role === Role.ADMIN
+    ? {
+        role: requested ? Role.VIEWER : Role.ADMIN,
+        serviceCenters: requested ? [requested] : [],
+      }
+    : {
+        role: Role.VIEWER,
+        serviceCenters: allowedServiceCenters.filter((item) => !requested || item === requested),
+      };
+}
 
 export async function reportRoutes(app: FastifyInstance) {
+  app.get('/api/reports/export', async (request, reply) => {
+    const actor = await actorFrom(request);
+    const { serviceCenter } = z
+      .object({ serviceCenter: z.string().min(1).max(50).optional() })
+      .parse(request.query);
+    const report = await createCurrentStatusExport(
+      reportScope(actor.role, actor.serviceCenters, serviceCenter),
+    );
+    return reply
+      .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('content-disposition', `attachment; filename="${report.filename}"`)
+      .send(report.buffer);
+  });
+
+  app.get('/api/reports/site-flow', async (request, reply) => {
+    const actor = await actorFrom(request);
+    const { serviceCenter } = z
+      .object({ serviceCenter: z.string().min(1).max(50).optional() })
+      .parse(request.query);
+    const report = await createSiteFlowExport(
+      reportScope(actor.role, actor.serviceCenters, serviceCenter),
+    );
+    return reply
+      .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('content-disposition', `attachment; filename="${report.filename}"`)
+      .send(report.buffer);
+  });
+
   app.get('/api/reports/weekly', async (request) => {
     const actor = await actorFrom(request);
     const { week } = z.object({ week: z.coerce.date() }).parse(request.query);
@@ -16,6 +58,7 @@ export async function reportRoutes(app: FastifyInstance) {
             site: {
               include: {
                 region: true,
+                serviceCenter: true,
                 workflows: {
                   where: { active: true },
                   include: { steps: { include: { templateStep: true } } },
@@ -28,7 +71,8 @@ export async function reportRoutes(app: FastifyInstance) {
     });
     if (!batch) return { week, totals: {}, blockersByStep: {}, blockersByRegion: {}, completed: 0 };
     const allowed = batch.memberships.filter(
-      (item) => actor.role === Role.ADMIN || actor.regions.includes(item.site.region.code),
+      (item) =>
+        actor.role === Role.ADMIN || actor.serviceCenters.includes(item.site.serviceCenter.code),
     );
     const statuses = allowed
       .map((item) => item.site.workflows[0]?.status)

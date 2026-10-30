@@ -6,7 +6,7 @@ import { Role } from '@prisma/client';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import { prisma } from '../db.js';
-import { actorFrom, authorizeRegion, requireRole } from '../lib/auth.js';
+import { actorFrom, authorizeServiceCenter, requireRole } from '../lib/auth.js';
 import { notFound, validation } from '../lib/errors.js';
 import { matchesEvidenceType, safeFilename, sha256 } from '../lib/security.js';
 import { reopenBranch, updateSiteStep } from '../services/workflow-service.js';
@@ -14,6 +14,7 @@ import { reopenBranch, updateSiteStep } from '../services/workflow-service.js';
 const filtersSchema = z.object({
   week: z.string().optional(),
   region: z.string().optional(),
+  serviceCenter: z.string().optional(),
   siteType: z.enum(['NORMAL', 'SHARED']).optional(),
   sectorAddition: z.enum(['YES', 'NO']).optional(),
   status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED']).optional(),
@@ -26,12 +27,14 @@ const filtersSchema = z.object({
 export async function siteRoutes(app: FastifyInstance, config: Config) {
   app.get('/api/dashboard', async (request) => {
     const actor = await actorFrom(request);
-    const regionWhere =
-      actor.role === Role.ADMIN ? {} : { site: { region: { code: { in: actor.regions } } } };
+    const scopeWhere =
+      actor.role === Role.ADMIN
+        ? {}
+        : { site: { serviceCenter: { code: { in: actor.serviceCenters } } } };
     const workflows = await prisma.siteWorkflow.findMany({
-      where: { active: true, ...regionWhere },
+      where: { active: true, ...scopeWhere },
       include: {
-        site: { include: { region: true } },
+        site: { include: { region: true, serviceCenter: true } },
         steps: { include: { templateStep: true } },
       },
       orderBy: { site: { siteIdText: 'asc' } },
@@ -60,18 +63,54 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
             publicId: item.site.publicId,
             siteIdText: item.site.siteIdText,
             region: item.site.region.code,
+            serviceCenter: item.site.serviceCenter.code,
             actionableSteps: item.steps
               .filter((step) => step.state === 'ACTIONABLE')
               .map((step) => step.templateStep.label),
           })),
       ]),
     );
+    const scopeBreakdown = Object.values(
+      workflows.reduce<
+        Record<
+          string,
+          {
+            serviceCenter: string;
+            regions: Set<string>;
+            total: number;
+            completed: number;
+            blocked: number;
+          }
+        >
+      >(
+        (result, workflow) => {
+          const serviceCenter = workflow.site.serviceCenter.code;
+          const current = result[serviceCenter] ?? {
+            serviceCenter,
+            regions: new Set<string>(),
+            total: 0,
+            completed: 0,
+            blocked: 0,
+          };
+          current.regions.add(workflow.site.region.code);
+          current.total += 1;
+          if (workflow.status === 'COMPLETED') current.completed += 1;
+          if (workflow.status === 'BLOCKED') current.blocked += 1;
+          result[serviceCenter] = current;
+          return result;
+        },
+        {},
+      ),
+    )
+      .map((item) => ({ ...item, regions: [...item.regions].sort() }))
+      .sort((a, b) => a.serviceCenter.localeCompare(b.serviceCenter));
     return {
       total: workflows.length,
       counts,
       latestBatch,
       blocked,
       sitesByStatus,
+      scopeBreakdown,
     };
   });
 
@@ -81,8 +120,11 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
     const where = {
       active: true,
       site: {
-        ...(actor.role === Role.ADMIN ? {} : { region: { code: { in: actor.regions } } }),
+        ...(actor.role === Role.ADMIN
+          ? {}
+          : { serviceCenter: { code: { in: actor.serviceCenters } } }),
         ...(filters.region ? { region: { code: filters.region } } : {}),
+        ...(filters.serviceCenter ? { serviceCenter: { code: filters.serviceCenter } } : {}),
         ...(filters.siteType ? { siteType: filters.siteType } : {}),
         ...(filters.sectorAddition ? { sectorAddition: filters.sectorAddition } : {}),
         ...(filters.search
@@ -113,6 +155,7 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
           site: {
             include: {
               region: true,
+              serviceCenter: true,
               assignedUsers: {
                 include: { user: { select: { id: true, firstName: true, lastName: true } } },
               },
@@ -147,6 +190,7 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
       where: { publicId },
       include: {
         region: true,
+        serviceCenter: true,
         memberships: { include: { batch: true }, orderBy: { createdAt: 'desc' } },
         workflows: {
           where: { active: true },
@@ -167,7 +211,7 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
     });
     if (!site) throw notFound('Site not found.');
     if (!site.active) throw notFound('This site belongs to an archived plan.');
-    authorizeRegion(actor, site.region.code);
+    authorizeServiceCenter(actor, site.serviceCenter.code);
     const workflow = site.workflows[0];
     const audits = workflow
       ? await prisma.auditEvent.findMany({
@@ -195,10 +239,12 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
       .parse(request.body);
     const step = await prisma.siteStep.findUnique({
       where: { id: siteStepId },
-      include: { workflow: { include: { site: { include: { region: true } } } } },
+      include: {
+        workflow: { include: { site: { include: { region: true, serviceCenter: true } } } },
+      },
     });
     if (!step) throw notFound('Site step not found.');
-    authorizeRegion(actor, step.workflow.site.region.code);
+    authorizeServiceCenter(actor, step.workflow.site.serviceCenter.code);
     return updateSiteStep({
       siteStepId,
       answer: body.answer,
@@ -224,10 +270,12 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
     const { siteStepId } = z.object({ siteStepId: z.string().uuid() }).parse(request.params);
     const step = await prisma.siteStep.findUnique({
       where: { id: siteStepId },
-      include: { workflow: { include: { site: { include: { region: true } } } } },
+      include: {
+        workflow: { include: { site: { include: { region: true, serviceCenter: true } } } },
+      },
     });
     if (!step) throw notFound('Site step not found.');
-    authorizeRegion(actor, step.workflow.site.region.code);
+    authorizeServiceCenter(actor, step.workflow.site.serviceCenter.code);
     const upload = await request.file({
       limits: { fileSize: config.MAX_EVIDENCE_BYTES, files: 1 },
     });
@@ -266,11 +314,17 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
     const evidence = await prisma.stepEvidence.findUnique({
       where: { id: evidenceId },
       include: {
-        siteStep: { include: { workflow: { include: { site: { include: { region: true } } } } } },
+        siteStep: {
+          include: {
+            workflow: {
+              include: { site: { include: { region: true, serviceCenter: true } } },
+            },
+          },
+        },
       },
     });
     if (!evidence) throw notFound('Evidence not found.');
-    authorizeRegion(actor, evidence.siteStep.workflow.site.region.code);
+    authorizeServiceCenter(actor, evidence.siteStep.workflow.site.serviceCenter.code);
     return reply
       .header(
         'content-disposition',

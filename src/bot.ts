@@ -1,9 +1,10 @@
-import { Bot, InlineKeyboard, InputFile } from 'grammy';
-import type { Prisma } from '@prisma/client';
+import { Bot, InlineKeyboard, InputFile, type Context } from 'grammy';
+import type { Prisma, Role } from '@prisma/client';
 import type { Config } from './config.js';
 import { prisma } from './db.js';
 import { opaqueToken, sha256 } from './lib/security.js';
 import { createCurrentStatusExport } from './services/status-export.js';
+import { createSiteFlowExport } from './services/site-flow-export.js';
 import { getReminderStats } from './services/reminder.js';
 
 function launchKeyboard(config: Config, startParam?: string) {
@@ -16,40 +17,97 @@ async function authorizedUser(telegramUserId?: number) {
   if (!telegramUserId) return null;
   return prisma.user.findUnique({
     where: { telegramUserId: BigInt(telegramUserId), active: true },
-    include: { regions: { include: { region: true } } },
+    include: {
+      regions: { include: { region: true } },
+      serviceCenters: { include: { serviceCenter: true } },
+    },
   });
+}
+
+async function configuredChat(telegramChatId: number | undefined, chatType?: string) {
+  if (!telegramChatId || chatType === 'private') return null;
+  return prisma.botChat.findUnique({
+    where: { telegramChatId: BigInt(telegramChatId) },
+    include: { serviceCenters: { include: { serviceCenter: true } } },
+  });
+}
+
+function effectiveServiceCenters(
+  user: NonNullable<Awaited<ReturnType<typeof authorizedUser>>>,
+  chat: Awaited<ReturnType<typeof configuredChat>>,
+) {
+  const userServiceCenters = user.serviceCenters.map((item) => item.serviceCenter.code);
+  const chatServiceCenters = chat?.serviceCenters.map((item) => item.serviceCenter.code) ?? [];
+  if (chat && !chat.active) return [];
+  return resolveGroupServiceCenters(
+    user.role,
+    userServiceCenters,
+    chat ? chatServiceCenters : null,
+  );
+}
+
+export function resolveGroupServiceCenters(
+  role: Role,
+  userServiceCenters: string[],
+  chatServiceCenters: string[] | null,
+): string[] | null {
+  if (chatServiceCenters === null) return role === 'ADMIN' ? null : userServiceCenters;
+  if (!chatServiceCenters.length) return [];
+  return role === 'ADMIN'
+    ? chatServiceCenters
+    : userServiceCenters.filter((serviceCenter) => chatServiceCenters.includes(serviceCenter));
+}
+
+function workflowServiceCenterScope(serviceCenters: string[] | null) {
+  return serviceCenters === null
+    ? {}
+    : { site: { serviceCenter: { code: { in: serviceCenters } } } };
+}
+
+async function commandScope(ctx: Context) {
+  const user = await authorizedUser(ctx.from?.id);
+  if (!user) return { error: 'Your Telegram account is not authorized.' } as const;
+  const chat = await configuredChat(ctx.chat?.id, ctx.chat?.type);
+  if (ctx.chat?.type !== 'private' && !chat)
+    return {
+      error:
+        'This Telegram group is not configured. Ask an administrator to assign its service center (SC).',
+    } as const;
+  const serviceCenters = effectiveServiceCenters(user, chat);
+  if (serviceCenters !== null && !serviceCenters.length)
+    return { error: 'You do not have access to this group’s assigned team/SC scope.' } as const;
+  return { user, chat, serviceCenters } as const;
 }
 
 export function createBot(config: Config) {
   if (!config.TELEGRAM_BOT_TOKEN) return null;
   const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
   bot.command('start', async (ctx) => {
-    if (!(await authorizedUser(ctx.from?.id)))
-      return ctx.reply('Your Telegram account is not authorized.');
+    const scope = await commandScope(ctx);
+    if ('error' in scope) return ctx.reply(scope.error);
     return ctx.reply('Open the weekly site follow-up workspace.', {
       reply_markup: launchKeyboard(config),
     });
   });
   bot.command('open', async (ctx) => {
-    if (!(await authorizedUser(ctx.from?.id)))
-      return ctx.reply('Your Telegram account is not authorized.');
+    const scope = await commandScope(ctx);
+    if ('error' in scope) return ctx.reply(scope.error);
     return ctx.reply('Open the site follow-up app.', { reply_markup: launchKeyboard(config) });
   });
   bot.command('help', async (ctx) => {
-    if (!(await authorizedUser(ctx.from?.id)))
-      return ctx.reply('Your Telegram account is not authorized.');
+    const scope = await commandScope(ctx);
+    if ('error' in scope) return ctx.reply(scope.error);
     return ctx.reply(
-      '/open opens the app. /summary shows the latest weekly totals. /remind sends the current follow-up reminder. /export shares the current detailed Excel report.',
+      '/open opens the app. /summary, /remind, /export, and /flowexport use this group’s assigned SC scope. /flowexport lists every site with its current and next steps. Administrators can run exports in a private chat for the all-SC view.',
     );
   });
   bot.command('summary', async (ctx) => {
-    const user = await authorizedUser(ctx.from?.id);
-    if (!user) return ctx.reply('Your Telegram account is not authorized.');
-    const regions = user.regions.map((item) => item.region.code);
+    const scope = await commandScope(ctx);
+    if ('error' in scope) return ctx.reply(scope.error);
     const workflows = await prisma.siteWorkflow.findMany({
       where: {
         active: true,
-        ...(user.role === 'ADMIN' ? {} : { site: { region: { code: { in: regions } } } }),
+        ...workflowServiceCenterScope(scope.serviceCenters),
       },
       include: {
         site: { include: { region: true } },
@@ -70,7 +128,9 @@ export function createBot(config: Config) {
       (item) => item.completedAt && item.completedAt >= startOfWeek,
     ).length;
     const text = [
-      'Current site summary',
+      scope.chat?.groupName
+        ? `Current site summary — ${scope.chat.groupName}`
+        : 'Current site summary — all authorized SCs',
       ...Object.entries(totals).map(
         ([status, count]) => `${status.replaceAll('_', ' ')}: ${count}`,
       ),
@@ -81,29 +141,38 @@ export function createBot(config: Config) {
     return ctx.reply(text, { reply_markup: launchKeyboard(config) });
   });
   bot.command('remind', async (ctx) => {
-    const user = await authorizedUser(ctx.from?.id);
-    if (!user) return ctx.reply('Your Telegram account is not authorized.');
-    const regions = user.regions.map((item) => item.region.code);
-    const stats = await getReminderStats(
-      user.role === 'ADMIN' ? {} : { site: { region: { code: { in: regions } } } },
-    );
+    const scope = await commandScope(ctx);
+    if ('error' in scope) return ctx.reply(scope.error);
+    const stats = await getReminderStats(workflowServiceCenterScope(scope.serviceCenters));
     const text = formatNotification(
       'REMINDER',
-      { recipient: user.firstName, ...stats },
+      { recipient: scope.chat?.groupName ?? scope.user.firstName, ...stats },
       config.APP_TIMEZONE,
     );
     return ctx.reply(text, { reply_markup: launchKeyboard(config) });
   });
   bot.command('export', async (ctx) => {
-    const user = await authorizedUser(ctx.from?.id);
-    if (!user) return ctx.reply('Your Telegram account is not authorized.');
+    const scope = await commandScope(ctx);
+    if ('error' in scope) return ctx.reply(scope.error);
     await ctx.replyWithChatAction('upload_document');
     const report = await createCurrentStatusExport({
-      role: user.role,
-      regions: user.regions.map((item) => item.region.code),
+      role: scope.serviceCenters === null ? scope.user.role : 'VIEWER',
+      serviceCenters: scope.serviceCenters ?? [],
     });
     return ctx.replyWithDocument(new InputFile(report.buffer, report.filename), {
       caption: `Current site status with detailed steps (${report.siteCount} sites).`,
+    });
+  });
+  bot.command('flowexport', async (ctx) => {
+    const scope = await commandScope(ctx);
+    if ('error' in scope) return ctx.reply(scope.error);
+    await ctx.replyWithChatAction('upload_document');
+    const report = await createSiteFlowExport({
+      role: scope.serviceCenters === null ? scope.user.role : 'VIEWER',
+      serviceCenters: scope.serviceCenters ?? [],
+    });
+    return ctx.replyWithDocument(new InputFile(report.buffer, report.filename), {
+      caption: `Sites by SC and region with current and next steps (${report.siteCount} sites).`,
     });
   });
   bot.catch((error) => console.error('Telegram bot update failed', error));
@@ -166,13 +235,13 @@ function formatNotification(type: string, payload: Record<string, unknown>, time
     timeStyle: 'short',
   }).format(new Date());
   if (type === 'ESCALATION')
-    return `Blocked site escalation\nSite: ${payload.siteId}\nRegion: ${payload.region}\nStep: ${payload.step}\nResult: ${payload.answer}\nComment: ${payload.comment}\nUpdated by: ${payload.updater}\nTime: ${payload.eventTime ?? time}`;
+    return `Blocked site escalation\nSite: ${payload.siteId}\nSC: ${payload.serviceCenter}\nRegion: ${payload.region}\nStep: ${payload.step}\nResult: ${payload.answer}\nComment: ${payload.comment}\nUpdated by: ${payload.updater}\nTime: ${payload.eventTime ?? time}`;
   if (type === 'RESOLUTION')
     return `Blocked item resolved\nSite: ${payload.siteId}\nStep: ${payload.step}\nResult: ${payload.answer}\nUpdated by: ${payload.updater}\nTime: ${payload.eventTime ?? time}`;
   if (type === 'SITE_COMPLETED')
-    return `Site implementation completed\nSite: ${payload.siteId}\nRegion: ${payload.region}\nUpdated by: ${payload.updater}\nTime: ${payload.eventTime ?? time}`;
+    return `Site implementation completed\nSite: ${payload.siteId}\nSC: ${payload.serviceCenter}\nRegion: ${payload.region}\nUpdated by: ${payload.updater}\nTime: ${payload.eventTime ?? time}`;
   if (type === 'IMPORT_COMMITTED')
-    return `Weekly import committed\nWeek: ${String(payload.reportingWeek).slice(0, 10)}\nAccepted: ${payload.acceptedRows}\nRejected: ${payload.rejectedRows}\nScenarios: ${formatCounts(payload.scenarioCounts as Record<string, number>)}\nRegions: ${formatCounts(payload.regionCounts as Record<string, number>)}`;
+    return `Weekly import committed\nWeek: ${String(payload.reportingWeek).slice(0, 10)}\nAccepted: ${payload.acceptedRows}\nRejected: ${payload.rejectedRows}\nSCs: ${formatCounts(payload.serviceCenterCounts as Record<string, number>)}\nScenarios: ${formatCounts(payload.scenarioCounts as Record<string, number>)}\nRegions: ${formatCounts(payload.regionCounts as Record<string, number>)}`;
   if (type === 'REMINDER')
     return `Weekly follow-up reminder\nRecipient: ${payload.recipient ?? 'Team'}\nActionable sites: ${payload.actionable}\nBlocked sites: ${payload.blocked}`;
   return `Site follow-up notification\n${JSON.stringify(payload)}`;

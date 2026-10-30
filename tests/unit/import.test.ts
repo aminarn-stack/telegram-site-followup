@@ -4,6 +4,7 @@ import { parseSector, parseSiteType, validateRows } from '../../src/domain/impor
 const valid = (siteId = '001001') => ({
   'Site ID': siteId,
   Region: ' North ',
+  SC: ' SC-01 ',
   'Shared Site Or Normal Site': 'normal site',
   'Add sector included or Not': 'Not Included',
 });
@@ -16,6 +17,7 @@ describe('weekly import validation', () => {
     expect(row).toMatchObject({
       siteIdText: '001001',
       region: 'North',
+      serviceCenter: 'SC-01',
       siteType: 'NORMAL',
       sectorAddition: 'NO',
       errors: [],
@@ -34,6 +36,7 @@ describe('weekly import validation', () => {
         values: {
           ...valid('a-1'),
           Region: '',
+          SC: '',
           'Shared Site Or Normal Site': 'Partner',
           'Add sector included or Not': 'Maybe',
         },
@@ -42,6 +45,7 @@ describe('weekly import validation', () => {
     expect(rows[1]?.errors).toEqual(
       expect.arrayContaining([
         'Region is required.',
+        'SC is required.',
         'Site type must be Normal or Shared.',
         'Sector addition must be Yes or No.',
         'Duplicate Site ID; first found on row 2.',

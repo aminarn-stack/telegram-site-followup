@@ -27,13 +27,18 @@ export interface StepSnapshot {
   state: WorkflowState;
 }
 
-const initialAnswers = ['Done-Permission needed', 'Done-Permission no needed', 'Not Done'] as const;
+const initialAnswers = [
+  'Done - Permission needed',
+  'Done - Permission not needed',
+  'Not Done',
+] as const;
 const permissionAnswers = ['Available', 'Not Available'] as const;
 const doneAnswers = ['Done', 'Not Done'] as const;
 const receivedAnswers = ['Received', 'Not Received'] as const;
 const okAnswers = ['OK', 'NOK'] as const;
-const submittedAnswers = ['Submitted', 'Not submitted'] as const;
-const deliveryAnswers = ['Delivered', 'Not delivered'] as const;
+const submittedAnswers = ['Submitted', 'Not Submitted'] as const;
+const deliveryAnswers = ['Delivered', 'Not Delivered'] as const;
+const licenseRequiredAnswers = ['Yes', 'Requested - No'] as const;
 const implementationAnswers = ['Done', 'Ongoing', 'Not Possible'] as const;
 
 const step = (
@@ -48,7 +53,7 @@ const step = (
 const base = [
   step('INITIAL_ACCESS', 1, 'Initial access assessment', null, 'INITIAL_ACCESS', initialAnswers),
   step('PERMISSION', 2, 'Permission', 'INITIAL_ACCESS', 'PERMISSION', permissionAnswers),
-  step('AVAILABLE_PORT', 3, 'Available port checking', null, 'PORT_CHECK', okAnswers),
+  step('AVAILABLE_PORT', 3, 'Available port check', null, 'PORT_CHECK', okAnswers),
   step('PRE_TSS', 4, 'Pre-TSS', 'PERMISSION', 'STANDARD', doneAnswers),
   step('RND_SUBMISSION', 5, 'RND submission', 'PRE_TSS', 'STANDARD', doneAnswers),
   step(
@@ -59,8 +64,17 @@ const base = [
     'RECEIPT',
     receivedAnswers,
   ),
-  step('BP_REQUEST', 7, 'BP Request', 'INSTALLATION_PLAN', 'STANDARD', doneAnswers),
-  step('BP_ISSUANCE', 8, 'BP isuance by RMPS', 'BP_REQUEST', 'STANDARD', doneAnswers),
+  step('BP_REQUEST', 7, 'BP request', 'INSTALLATION_PLAN', 'STANDARD', doneAnswers),
+  step('BP_ISSUANCE', 8, 'BP issuance by RMPS', 'BP_REQUEST', 'STANDARD', doneAnswers),
+  step(
+    'LICENSE_REQUIRED',
+    9,
+    'License required',
+    'BP_ISSUANCE',
+    'LICENSE_REQUIRED',
+    licenseRequiredAnswers,
+  ),
+  step('LICENSE_ISSUANCE', 10, 'License issuance', 'LICENSE_REQUIRED', 'STANDARD', doneAnswers),
 ] as const;
 
 export const WORKFLOW_TEMPLATES: readonly TemplateDefinition[] = [
@@ -71,23 +85,23 @@ export const WORKFLOW_TEMPLATES: readonly TemplateDefinition[] = [
     sectorAddition: 'NO',
     steps: [
       ...base,
-      step('CORE_REQUEST', 9, 'Core/SID/CGI/IP request', 'BP_ISSUANCE', 'STANDARD', doneAnswers),
-      step('CORE_RECEIPT', 10, 'Core/SID/CGI/IP', 'CORE_REQUEST', 'RECEIPT', receivedAnswers),
-      step('FPA_CHECK', 11, 'FPA check', 'BP_ISSUANCE', 'FPA_CHECK', okAnswers),
-      step('MR_REQUEST', 12, 'MR request', 'FPA_CHECK', 'MR_REQUEST', submittedAnswers),
-      step('MATERIAL_DELIVERY', 13, 'Material delivery', 'MR_REQUEST', 'DELIVERY', deliveryAnswers),
+      step('CORE_REQUEST', 11, 'Core/SID/CGI/IP request', 'BP_ISSUANCE', 'STANDARD', doneAnswers),
+      step('CORE_RECEIPT', 12, 'Core/SID/CGI/IP', 'CORE_REQUEST', 'RECEIPT', receivedAnswers),
+      step('FPA_CHECK', 13, 'FPA check', 'BP_ISSUANCE', 'FPA_CHECK', okAnswers),
+      step('MR_REQUEST', 14, 'MR request', 'FPA_CHECK', 'MR_REQUEST', submittedAnswers),
+      step('MATERIAL_DELIVERY', 15, 'Material delivery', 'MR_REQUEST', 'DELIVERY', deliveryAnswers),
       step(
         'IMPLEMENTATION_ACCESS',
-        14,
+        16,
         'Implementation access arrangement',
         'MATERIAL_DELIVERY',
         'STANDARD',
         doneAnswers,
       ),
-      step('RAISING_CR', 15, 'Raising CR', 'IMPLEMENTATION_ACCESS', 'STANDARD', doneAnswers),
+      step('RAISING_CR', 17, 'Raising CR', 'IMPLEMENTATION_ACCESS', 'STANDARD', doneAnswers),
       step(
         'SITE_IMPLEMENTATION',
-        16,
+        18,
         'Site Implementation',
         'RAISING_CR',
         'SITE_IMPLEMENTATION',
@@ -104,39 +118,39 @@ export const WORKFLOW_TEMPLATES: readonly TemplateDefinition[] = [
       ...base,
       step(
         'SHARING_REQUEST',
-        9,
+        11,
         'Sharing request submission',
         'BP_ISSUANCE',
         'STANDARD',
         doneAnswers,
       ),
-      step('SHARING_RESULT', 10, 'Sharing Result', 'SHARING_REQUEST', 'SHARING_RESULT', [
+      step('SHARING_RESULT', 12, 'Sharing result', 'SHARING_REQUEST', 'SHARING_RESULT', [
         'Approved',
         'Rejected',
       ]),
       step(
         'CORE_REQUEST',
-        11,
+        13,
         'Core/SID/CGI/IP request',
         'SHARING_RESULT',
         'STANDARD',
         doneAnswers,
       ),
-      step('CORE_RECEIPT', 12, 'Core/SID/CGI/IP', 'CORE_REQUEST', 'RECEIPT', receivedAnswers),
-      step('MR_REQUEST', 13, 'MR request', 'SHARING_RESULT', 'MR_REQUEST', submittedAnswers),
-      step('MATERIAL_DELIVERY', 14, 'Material delivery', 'MR_REQUEST', 'DELIVERY', deliveryAnswers),
+      step('CORE_RECEIPT', 14, 'Core/SID/CGI/IP', 'CORE_REQUEST', 'RECEIPT', receivedAnswers),
+      step('MR_REQUEST', 15, 'MR request', 'SHARING_RESULT', 'MR_REQUEST', submittedAnswers),
+      step('MATERIAL_DELIVERY', 16, 'Material delivery', 'MR_REQUEST', 'DELIVERY', deliveryAnswers),
       step(
         'IMPLEMENTATION_ACCESS',
-        15,
+        17,
         'Implementation access arrangement',
         'MATERIAL_DELIVERY',
         'STANDARD',
         doneAnswers,
       ),
-      step('RAISING_CR', 16, 'Raising CR', 'IMPLEMENTATION_ACCESS', 'STANDARD', doneAnswers),
+      step('RAISING_CR', 18, 'Raising CR', 'IMPLEMENTATION_ACCESS', 'STANDARD', doneAnswers),
       step(
         'SITE_IMPLEMENTATION',
-        17,
+        19,
         'Site Implementation',
         'RAISING_CR',
         'SITE_IMPLEMENTATION',
@@ -153,29 +167,29 @@ export const WORKFLOW_TEMPLATES: readonly TemplateDefinition[] = [
       ...base,
       step(
         'CIVIL_MATERIAL',
-        9,
+        11,
         'Arranging for civil material',
         'BP_ISSUANCE',
         'STANDARD',
         doneAnswers,
       ),
-      step('CORE_REQUEST', 10, 'Core/SID/CGI/IP request', 'BP_ISSUANCE', 'STANDARD', doneAnswers),
-      step('CORE_RECEIPT', 11, 'Core/SID/CGI/IP', 'CORE_REQUEST', 'RECEIPT', receivedAnswers),
-      step('FPA_CHECK', 12, 'FPA check', 'BP_ISSUANCE', 'FPA_CHECK', okAnswers),
-      step('MR_REQUEST', 13, 'MR request', 'CIVIL_MATERIAL', 'MR_REQUEST', submittedAnswers),
-      step('MATERIAL_DELIVERY', 14, 'Material delivery', 'MR_REQUEST', 'DELIVERY', deliveryAnswers),
+      step('CORE_REQUEST', 12, 'Core/SID/CGI/IP request', 'BP_ISSUANCE', 'STANDARD', doneAnswers),
+      step('CORE_RECEIPT', 13, 'Core/SID/CGI/IP', 'CORE_REQUEST', 'RECEIPT', receivedAnswers),
+      step('FPA_CHECK', 14, 'FPA check', 'BP_ISSUANCE', 'FPA_CHECK', okAnswers),
+      step('MR_REQUEST', 15, 'MR request', 'CIVIL_MATERIAL', 'MR_REQUEST', submittedAnswers),
+      step('MATERIAL_DELIVERY', 16, 'Material delivery', 'MR_REQUEST', 'DELIVERY', deliveryAnswers),
       step(
         'IMPLEMENTATION_ACCESS',
-        15,
+        17,
         'Implementation access arrangement',
         'MATERIAL_DELIVERY',
         'STANDARD',
         doneAnswers,
       ),
-      step('RAISING_CR', 16, 'Raising CR', 'IMPLEMENTATION_ACCESS', 'STANDARD', doneAnswers),
+      step('RAISING_CR', 18, 'Raising CR', 'IMPLEMENTATION_ACCESS', 'STANDARD', doneAnswers),
       step(
         'SITE_IMPLEMENTATION',
-        17,
+        19,
         'Site Implementation',
         'RAISING_CR',
         'SITE_IMPLEMENTATION',
@@ -192,7 +206,7 @@ export const WORKFLOW_TEMPLATES: readonly TemplateDefinition[] = [
       ...base,
       step(
         'CIVIL_MATERIAL',
-        9,
+        11,
         'Arranging for civil material',
         'BP_ISSUANCE',
         'STANDARD',
@@ -200,39 +214,39 @@ export const WORKFLOW_TEMPLATES: readonly TemplateDefinition[] = [
       ),
       step(
         'SHARING_REQUEST',
-        10,
+        12,
         'Sharing request submission',
         'BP_ISSUANCE',
         'STANDARD',
         doneAnswers,
       ),
-      step('SHARING_RESULT', 11, 'Sharing Result', 'SHARING_REQUEST', 'SHARING_RESULT', [
+      step('SHARING_RESULT', 13, 'Sharing result', 'SHARING_REQUEST', 'SHARING_RESULT', [
         'Approved',
         'Rejected',
       ]),
       step(
         'CORE_REQUEST',
-        12,
+        14,
         'Core/SID/CGI/IP request',
         'SHARING_REQUEST',
         'STANDARD',
         doneAnswers,
       ),
-      step('CORE_RECEIPT', 13, 'Core/SID/CGI/IP', 'CORE_REQUEST', 'RECEIPT', receivedAnswers),
-      step('MR_REQUEST', 14, 'MR request', 'SHARING_RESULT', 'MR_REQUEST', submittedAnswers),
-      step('MATERIAL_DELIVERY', 15, 'Material delivery', 'MR_REQUEST', 'DELIVERY', deliveryAnswers),
+      step('CORE_RECEIPT', 15, 'Core/SID/CGI/IP', 'CORE_REQUEST', 'RECEIPT', receivedAnswers),
+      step('MR_REQUEST', 16, 'MR request', 'SHARING_RESULT', 'MR_REQUEST', submittedAnswers),
+      step('MATERIAL_DELIVERY', 17, 'Material delivery', 'MR_REQUEST', 'DELIVERY', deliveryAnswers),
       step(
         'IMPLEMENTATION_ACCESS',
-        16,
+        18,
         'Implementation access arrangement',
         'MATERIAL_DELIVERY',
         'STANDARD',
         doneAnswers,
       ),
-      step('RAISING_CR', 17, 'Raising CR', 'IMPLEMENTATION_ACCESS', 'STANDARD', doneAnswers),
+      step('RAISING_CR', 19, 'Raising CR', 'IMPLEMENTATION_ACCESS', 'STANDARD', doneAnswers),
       step(
         'SITE_IMPLEMENTATION',
-        18,
+        20,
         'Site Implementation',
         'RAISING_CR',
         'SITE_IMPLEMENTATION',
@@ -259,8 +273,8 @@ export function isPositive(stepType: string, answer: string): boolean {
     STANDARD: ['Not Done'],
     RECEIPT: ['Not Received'],
     SHARING_RESULT: ['Rejected'],
-    MR_REQUEST: ['Not submitted'],
-    DELIVERY: ['Not delivered'],
+    MR_REQUEST: ['Not Submitted'],
+    DELIVERY: ['Not Delivered'],
     SITE_IMPLEMENTATION: ['Not Possible'],
   };
   return !negatives[stepType]?.includes(answer);
@@ -300,18 +314,34 @@ export function recalculate(
   const byCode = new Map(snapshots.map((item) => [item.code, { ...item }]));
   const initial = byCode.get('INITIAL_ACCESS');
   const permission = byCode.get('PERMISSION');
-  if (permission && initial?.answer === 'Done-Permission no needed') {
+  if (
+    permission &&
+    ['Done - Permission not needed', 'Done-Permission no needed'].includes(initial?.answer ?? '')
+  ) {
     permission.answer = null;
     permission.state = 'NOT_APPLICABLE';
   } else if (permission?.state === 'NOT_APPLICABLE') {
     permission.state = 'LOCKED';
   }
 
+  const licenseRequired = byCode.get('LICENSE_REQUIRED');
+  const licenseIssuance = byCode.get('LICENSE_ISSUANCE');
+  if (licenseIssuance && licenseRequired?.answer === 'Requested - No') {
+    licenseIssuance.answer = null;
+    licenseIssuance.state = 'NOT_APPLICABLE';
+  } else if (licenseIssuance?.state === 'NOT_APPLICABLE') {
+    licenseIssuance.state = 'LOCKED';
+  }
+
   for (const definition of template.steps) {
     const current = byCode.get(definition.code);
     if (!current) throw new Error(`Missing site step ${definition.code}`);
     if (current.state === 'NEEDS_REVIEW') continue;
-    if (definition.code === 'PERMISSION' && current.state === 'NOT_APPLICABLE') continue;
+    if (
+      ['PERMISSION', 'LICENSE_ISSUANCE'].includes(definition.code) &&
+      current.state === 'NOT_APPLICABLE'
+    )
+      continue;
 
     const prerequisite = definition.prerequisiteCode
       ? byCode.get(definition.prerequisiteCode)
@@ -319,7 +349,12 @@ export function recalculate(
     const prerequisiteSatisfied =
       definition.code === 'SITE_IMPLEMENTATION'
         ? template.steps
-            .filter((item) => item.code !== 'SITE_IMPLEMENTATION')
+            .filter(
+              (item) =>
+                !['SITE_IMPLEMENTATION', 'LICENSE_REQUIRED', 'LICENSE_ISSUANCE'].includes(
+                  item.code,
+                ),
+            )
             .every((item) => {
               const step = byCode.get(item.code);
               return step?.state === 'COMPLETED' || step?.state === 'NOT_APPLICABLE';

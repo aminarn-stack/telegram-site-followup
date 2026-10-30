@@ -28,12 +28,12 @@ All `/api` responses use JSON except file downloads. Authenticated endpoints req
 | Method | Path                                   | Access               | Purpose                                                                              |
 | ------ | -------------------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
 | GET    | `/api/dashboard`                       | Authorized           | Counts, latest batch, and permitted blockers.                                        |
-| GET    | `/api/sites`                           | Authorized           | Paginated region-authorized sites with filters and search.                           |
-| GET    | `/api/sites/:publicId`                 | Authorized region    | Metadata, workflow, evidence, escalations, and audit.                                |
+| GET    | `/api/sites`                           | Authorized           | Paginated SC-authorized sites with filters and search.                               |
+| GET    | `/api/sites/:publicId`                 | Authorized SC        | Metadata, workflow, evidence, escalations, and audit.                                |
 | PATCH  | `/api/site-steps/:siteStepId`          | Admin or contributor | Record an allowed answer with optimistic version and optional/required comment.      |
 | POST   | `/api/site-steps/:siteStepId/evidence` | Admin or contributor | Upload JPEG, PNG, WebP, or PDF evidence.                                             |
 | POST   | `/api/site-steps/:siteStepId/reopen`   | Admin                | Reopen a branch with a mandatory reason and mark completed descendants Needs Review. |
-| GET    | `/api/evidence/:evidenceId`            | Authorized region    | Download evidence as an attachment.                                                  |
+| GET    | `/api/evidence/:evidenceId`            | Authorized SC        | Download evidence as an attachment.                                                  |
 
 Step update body:
 
@@ -43,17 +43,36 @@ Step update body:
 
 ## Reporting and administration
 
-| Method   | Path                                     | Access     | Purpose                                                                      |
-| -------- | ---------------------------------------- | ---------- | ---------------------------------------------------------------------------- |
-| GET      | `/api/reports/weekly?week=YYYY-MM-DD`    | Authorized | Status totals and blocker aggregation for permitted regions.                 |
-| GET      | `/api/audit`                             | Admin      | Filtered immutable audit history.                                            |
-| GET/POST | `/api/admin/users`                       | Admin      | List or upsert Telegram users, roles, active state, and region access.       |
-| GET/POST | `/api/admin/regions`                     | Admin      | List or upsert regions.                                                      |
-| GET/POST | `/api/admin/chats`                       | Admin      | List or upsert bot chats and reminder settings.                              |
-| GET      | `/api/admin/templates`                   | Admin      | Inspect versioned workflow templates and exact steps.                        |
-| POST     | `/api/admin/templates/:templateId/clone` | Admin      | Create the next validated active version without rewriting history.          |
-| POST     | `/api/admin/plans/archive`               | Admin      | Archive active weekly workflows and clear the dashboard for the next import. |
+| Method   | Path                                        | Access     | Purpose                                                                      |
+| -------- | ------------------------------------------- | ---------- | ---------------------------------------------------------------------------- |
+| GET      | `/api/reports/weekly?week=YYYY-MM-DD`       | Authorized | Status totals and blocker aggregation for permitted SCs.                     |
+| GET      | `/api/reports/export`                       | Authorized | Download the current Excel report for all permitted service centers.         |
+| GET      | `/api/reports/export?serviceCenter=CODE`    | Authorized | Download the current Excel report for one permitted service center.          |
+| GET      | `/api/reports/site-flow`                    | Authorized | Download sites by SC/region with current and next workflow steps.            |
+| GET      | `/api/reports/site-flow?serviceCenter=CODE` | Authorized | Download the current/next-step report for one permitted SC.                  |
+| GET      | `/api/audit`                                | Admin      | Filtered immutable audit history.                                            |
+| GET/POST | `/api/admin/users`                          | Admin      | List or upsert Telegram users, roles, active state, and SC access.           |
+| GET      | `/api/admin/regions`                        | Admin      | List region codes discovered through imports.                                |
+| GET      | `/api/admin/service-centers`                | Admin      | List active SC codes discovered through imports.                             |
+| GET/POST | `/api/admin/chats`                          | Admin      | List or upsert bot chats, required SC scopes, and reminder settings.         |
+| GET      | `/api/admin/templates`                      | Admin      | Inspect versioned workflow templates and exact steps.                        |
+| POST     | `/api/admin/templates/:templateId/clone`    | Admin      | Create the next validated active version without rewriting history.          |
+| POST     | `/api/admin/plans/archive`                  | Admin      | Archive active weekly workflows and clear the dashboard for the next import. |
 
 ## Filtering
 
 `GET /api/sites` accepts `week`, `region`, `siteType`, `sectorAddition`, `status`, `assignedUser`, `search`, `page`, and `pageSize`. `GET /api/audit` accepts `entityType`, `entityId`, `actorId`, `from`, `to`, and `page`.
+
+## Scoped reporting
+
+- `GET /api/dashboard` returns only the authenticated user's permitted SCs. Administrators
+  receive the combined view plus `scopeBreakdown` totals per SC and its represented regions.
+- `GET /api/reports/export` downloads the current authorized Excel report.
+- `GET /api/reports/export?serviceCenter=CODE` downloads one SC report. Non-admin users can request
+  only an SC already included in their access.
+- `POST /api/admin/chats` accepts a required `serviceCenters` array and binds a Telegram group to
+  those SCs for commands, reminders, summaries, exports, and workflow notifications.
+- Region and SC catalogs are populated by committed imports. User and group assignments reject SC
+  codes that do not already exist in that catalog.
+- Archiving a weekly plan deactivates only the current sites and workflows. User-to-SC and
+  Telegram-group-to-SC access remains unchanged for the next import.

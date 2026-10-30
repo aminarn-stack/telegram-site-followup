@@ -27,7 +27,7 @@ export async function updateSiteStep(input: StepUpdateInput) {
         templateStep: true,
         workflow: {
           include: {
-            site: { include: { region: true } },
+            site: { include: { region: true, serviceCenter: true } },
             template: { include: { steps: { orderBy: { displayOrder: 'asc' } } } },
             steps: { include: { templateStep: true } },
           },
@@ -79,7 +79,9 @@ export async function updateSiteStep(input: StepUpdateInput) {
       'NOK',
       'Not Received',
       'Rejected',
+      'Not Submitted',
       'Not submitted',
+      'Not Delivered',
       'Not delivered',
       'Not Possible',
     ];
@@ -128,6 +130,7 @@ export async function updateSiteStep(input: StepUpdateInput) {
         await queueGroupNotifications(tx, 'ESCALATION', escalation.id, {
           siteId: target.workflow.site.siteIdText,
           region: target.workflow.site.region.code,
+          serviceCenter: target.workflow.site.serviceCenter.code,
           step: persisted.templateStep.label,
           answer: item.answer,
           comment: source,
@@ -144,6 +147,8 @@ export async function updateSiteStep(input: StepUpdateInput) {
           });
           await queueGroupNotifications(tx, 'RESOLUTION', open.id, {
             siteId: target.workflow.site.siteIdText,
+            region: target.workflow.site.region.code,
+            serviceCenter: target.workflow.site.serviceCenter.code,
             step: persisted.templateStep.label,
             answer: item.answer,
             updater,
@@ -168,6 +173,7 @@ export async function updateSiteStep(input: StepUpdateInput) {
         {
           siteId: target.workflow.site.siteIdText,
           region: target.workflow.site.region.code,
+          serviceCenter: target.workflow.site.serviceCenter.code,
           updater,
           eventTime,
           deepLinkTarget: { kind: 'site', publicId: target.workflow.site.publicId },
@@ -202,8 +208,16 @@ async function queueGroupNotifications(
   payload: Prisma.InputJsonValue,
   preference: 'escalations' | 'all' = 'escalations',
 ) {
+  const serviceCenter = String((payload as Prisma.InputJsonObject).serviceCenter ?? '');
   const chats = await tx.botChat.findMany({
-    where: preference === 'all' ? { active: true } : { active: true, escalations: true },
+    where: {
+      ...(preference === 'all' ? { active: true } : { active: true, escalations: true }),
+      ...(serviceCenter
+        ? {
+            serviceCenters: { some: { serviceCenter: { code: serviceCenter } } },
+          }
+        : {}),
+    },
   });
   for (const chat of chats) {
     await tx.notification.upsert({

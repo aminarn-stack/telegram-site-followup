@@ -4,7 +4,7 @@ import { prisma } from '../db.js';
 
 export interface ExportActor {
   role: Role;
-  regions: string[];
+  serviceCenters: string[];
 }
 
 function setColumnWidths(sheet: XLSX.WorkSheet, widths: number[]) {
@@ -15,10 +15,12 @@ export async function createCurrentStatusExport(actor: ExportActor) {
   const workflows = await prisma.siteWorkflow.findMany({
     where: {
       active: true,
-      ...(actor.role === 'ADMIN' ? {} : { site: { region: { code: { in: actor.regions } } } }),
+      ...(actor.role === 'ADMIN'
+        ? {}
+        : { site: { serviceCenter: { code: { in: actor.serviceCenters } } } }),
     },
     include: {
-      site: { include: { region: true } },
+      site: { include: { region: true, serviceCenter: true } },
       template: true,
       steps: {
         orderBy: { templateStep: { displayOrder: 'asc' } },
@@ -46,6 +48,7 @@ export async function createCurrentStatusExport(actor: ExportActor) {
     return {
       'Site ID': workflow.site.siteIdText,
       Region: workflow.site.region.code,
+      SC: workflow.site.serviceCenter.code,
       'Site Type': workflow.site.siteType,
       'Sector Addition': workflow.site.sectorAddition,
       Status: workflow.status.replaceAll('_', ' '),
@@ -62,6 +65,7 @@ export async function createCurrentStatusExport(actor: ExportActor) {
     workflow.steps.map((step) => ({
       'Site ID': workflow.site.siteIdText,
       Region: workflow.site.region.code,
+      SC: workflow.site.serviceCenter.code,
       'Site Status': workflow.status.replaceAll('_', ' '),
       'Step Order': step.templateStep.displayOrder,
       Step: step.templateStep.label,
@@ -75,11 +79,53 @@ export async function createCurrentStatusExport(actor: ExportActor) {
     })),
   );
 
+  const scopeRows = Object.values(
+    workflows.reduce<
+      Record<
+        string,
+        {
+          SC: string;
+          regionSet: Set<string>;
+          Total: number;
+          'Not Started': number;
+          'In Progress': number;
+          Blocked: number;
+          Completed: number;
+        }
+      >
+    >((rows, workflow) => {
+      const key = workflow.site.serviceCenter.code;
+      const row = rows[key] ?? {
+        SC: key,
+        regionSet: new Set<string>(),
+        Total: 0,
+        'Not Started': 0,
+        'In Progress': 0,
+        Blocked: 0,
+        Completed: 0,
+      };
+      row.regionSet.add(workflow.site.region.code);
+      row.Total += 1;
+      if (workflow.status === 'NOT_STARTED') row['Not Started'] += 1;
+      if (workflow.status === 'IN_PROGRESS') row['In Progress'] += 1;
+      if (workflow.status === 'BLOCKED') row.Blocked += 1;
+      if (workflow.status === 'COMPLETED') row.Completed += 1;
+      rows[key] = row;
+      return rows;
+    }, {}),
+  )
+    .map(({ regionSet, ...row }) => ({ ...row, Regions: [...regionSet].sort().join(', ') }))
+    .sort((a, b) => a.SC.localeCompare(b.SC));
+
   const workbook = XLSX.utils.book_new();
+  const scopes = XLSX.utils.json_to_sheet(scopeRows, {
+    header: ['SC', 'Regions', 'Total', 'Not Started', 'In Progress', 'Blocked', 'Completed'],
+  });
   const summary = XLSX.utils.json_to_sheet(summaryRows, {
     header: [
       'Site ID',
       'Region',
+      'SC',
       'Site Type',
       'Sector Addition',
       'Status',
@@ -95,6 +141,7 @@ export async function createCurrentStatusExport(actor: ExportActor) {
     header: [
       'Site ID',
       'Region',
+      'SC',
       'Site Status',
       'Step Order',
       'Step',
@@ -105,10 +152,13 @@ export async function createCurrentStatusExport(actor: ExportActor) {
       'Updated At',
     ],
   });
-  setColumnWidths(summary, [18, 14, 14, 16, 16, 12, 34, 34, 14, 24, 24]);
-  setColumnWidths(details, [18, 14, 16, 12, 34, 18, 22, 45, 24, 24]);
-  summary['!autofilter'] = { ref: summary['!ref'] ?? 'A1:K1' };
-  details['!autofilter'] = { ref: details['!ref'] ?? 'A1:J1' };
+  setColumnWidths(summary, [18, 14, 16, 14, 16, 16, 12, 34, 34, 14, 24, 24]);
+  setColumnWidths(details, [18, 14, 16, 16, 12, 34, 18, 22, 45, 24, 24]);
+  setColumnWidths(scopes, [20, 30, 12, 14, 14, 12, 12]);
+  scopes['!autofilter'] = { ref: scopes['!ref'] ?? 'A1:G1' };
+  summary['!autofilter'] = { ref: summary['!ref'] ?? 'A1:L1' };
+  details['!autofilter'] = { ref: details['!ref'] ?? 'A1:K1' };
+  XLSX.utils.book_append_sheet(workbook, scopes, 'Service Centers');
   XLSX.utils.book_append_sheet(workbook, summary, 'Current Status');
   XLSX.utils.book_append_sheet(workbook, details, 'Step Details');
 

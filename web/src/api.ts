@@ -6,6 +6,7 @@ export interface SessionUser {
   username?: string;
   role: 'ADMIN' | 'CONTRIBUTOR' | 'VIEWER';
   regions: string[];
+  serviceCenters: string[];
 }
 
 let token = localStorage.getItem('sessionToken') ?? '';
@@ -29,6 +30,24 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(`${data?.error?.message ?? 'Request failed'}${suffix}`);
   }
   return data as T;
+}
+
+export async function download(path: string, fallbackName: string) {
+  const headers = new Headers();
+  if (token) headers.set('authorization', `Bearer ${token}`);
+  const response = await fetch(path, { headers });
+  if (!response.ok) {
+    const data = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+    throw new Error(data?.error?.message ?? 'Download failed');
+  }
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function authenticate(): Promise<SessionUser> {

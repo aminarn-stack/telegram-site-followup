@@ -11,16 +11,37 @@ async function backfillActiveWorkflows(
   const activeWorkflows = await prisma.siteWorkflow.findMany({
     where: { templateId, active: true },
     include: {
-      steps: { select: { templateStepId: true, answer: true, state: true } },
+      steps: {
+        select: {
+          templateStepId: true,
+          answer: true,
+          state: true,
+          templateStep: { select: { code: true } },
+        },
+      },
     },
   });
   for (const workflow of activeWorkflows) {
     const current = workflow.steps.find((step) => step.templateStepId === templateStep.id);
     const allPreviousComplete = workflow.steps
-      .filter((step) => step.templateStepId !== templateStep.id)
+      .filter(
+        (step) =>
+          step.templateStepId !== templateStep.id &&
+          !['LICENSE_REQUIRED', 'LICENSE_ISSUANCE'].includes(step.templateStep.code),
+      )
       .every((step) => step.state === 'COMPLETED' || step.state === 'NOT_APPLICABLE');
     const shouldOpenImplementation =
       item.code === 'SITE_IMPLEMENTATION' && !current?.answer && allPreviousComplete;
+    const prerequisite = item.prerequisiteCode
+      ? workflow.steps.find((step) => step.templateStep.code === item.prerequisiteCode)
+      : null;
+    const shouldOpenFromPrerequisite = Boolean(
+      !current?.answer &&
+      prerequisite &&
+      ['COMPLETED', 'NOT_APPLICABLE'].includes(prerequisite.state),
+    );
+    const shouldSkipLicenseIssuance =
+      item.code === 'LICENSE_ISSUANCE' && prerequisite?.answer === 'Requested - No';
     await prisma.siteStep.upsert({
       where: {
         workflowId_templateStepId: {
@@ -28,15 +49,23 @@ async function backfillActiveWorkflows(
           templateStepId: templateStep.id,
         },
       },
-      update: shouldOpenImplementation ? { state: 'ACTIONABLE' } : {},
+      update:
+        shouldOpenImplementation || shouldOpenFromPrerequisite || shouldSkipLicenseIssuance
+          ? {
+              state: shouldSkipLicenseIssuance ? 'NOT_APPLICABLE' : 'ACTIONABLE',
+              ...(shouldSkipLicenseIssuance ? { answer: null } : {}),
+            }
+          : {},
       create: {
         workflowId: workflow.id,
         templateStepId: templateStep.id,
-        state: shouldOpenImplementation
-          ? 'ACTIONABLE'
-          : item.prerequisiteCode
-            ? 'LOCKED'
-            : 'ACTIONABLE',
+        state: shouldSkipLicenseIssuance
+          ? 'NOT_APPLICABLE'
+          : shouldOpenImplementation || shouldOpenFromPrerequisite
+            ? 'ACTIONABLE'
+            : item.prerequisiteCode
+              ? 'LOCKED'
+              : 'ACTIONABLE',
       },
     });
     if (shouldOpenImplementation && workflow.status === 'COMPLETED') {
@@ -52,7 +81,7 @@ async function main() {
   for (const definition of WORKFLOW_TEMPLATES) {
     const template = await prisma.workflowTemplate.upsert({
       where: { code_version: { code: definition.code, version: definition.version } },
-      update: { active: true },
+      update: {},
       create: {
         code: definition.code,
         version: definition.version,

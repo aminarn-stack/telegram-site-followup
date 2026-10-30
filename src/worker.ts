@@ -34,13 +34,19 @@ function scheduleMatches(expression: string, date: Date, timezone: string) {
 }
 
 async function enqueueReminders(now = new Date()) {
-  const chats = await prisma.botChat.findMany({ where: { active: true, reminders: true } });
+  const chats = await prisma.botChat.findMany({
+    where: { active: true, reminders: true, serviceCenters: { some: {} } },
+    include: { serviceCenters: { include: { serviceCenter: true } } },
+  });
   const dueChats = chats.filter((chat) =>
     scheduleMatches(chat.reminderSchedule, now, chat.timezone),
   );
   if (!dueChats.length) return;
-  const stats = await getReminderStats();
   for (const chat of dueChats) {
+    const serviceCenters = chat.serviceCenters.map((item) => item.serviceCenter.code);
+    const stats = await getReminderStats({
+      site: { serviceCenter: { code: { in: serviceCenters } } },
+    });
     const minuteKey = now.toISOString().slice(0, 16);
     await prisma.notification.upsert({
       where: { idempotencyKey: `REMINDER:${chat.id}:${minuteKey}` },
@@ -52,7 +58,7 @@ async function enqueueReminders(now = new Date()) {
         payload: {
           recipient: chat.groupName ?? chat.telegramChatId.toString(),
           ...stats,
-          deepLinkTarget: { kind: 'filters' },
+          deepLinkTarget: { kind: 'filters', serviceCenters },
         },
       },
     });

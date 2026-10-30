@@ -7,6 +7,7 @@ export interface Actor {
   telegramUserId: string;
   role: Role;
   regions: string[];
+  serviceCenters: string[];
 }
 
 export async function actorFrom(request: FastifyRequest): Promise<Actor> {
@@ -20,6 +21,7 @@ export async function actorFrom(request: FastifyRequest): Promise<Actor> {
     telegramUserId: request.user.telegramUserId,
     role: request.user.role,
     regions: request.user.regions,
+    serviceCenters: request.user.serviceCenters,
   };
 }
 
@@ -30,5 +32,11 @@ export function requireRole(actor: Actor, roles: readonly Role[]): void {
 export function authorizeRegion(actor: Actor, regionCode: string): void {
   if (actor.role !== 'ADMIN' && !actor.regions.includes(regionCode)) {
     throw forbidden('You do not have access to this region.');
+  }
+}
+
+export function authorizeServiceCenter(actor: Actor, serviceCenterCode: string): void {
+  if (actor.role !== 'ADMIN' && !actor.serviceCenters.includes(serviceCenterCode)) {
+    throw forbidden('You do not have access to this service center.');
   }
 }

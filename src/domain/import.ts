@@ -3,6 +3,7 @@ import type { SectorAddition, SiteType } from './workflow.js';
 export const REQUIRED_COLUMNS = [
   'Site ID',
   'Region',
+  'SC',
   'Shared Site Or Normal Site',
   'Add sector included or Not',
 ] as const;
@@ -16,6 +17,7 @@ export interface ValidImportRow {
   rowNumber: number;
   siteIdText: string;
   region: string;
+  serviceCenter: string;
   siteType: SiteType;
   sectorAddition: SectorAddition;
   errors: string[];
@@ -58,11 +60,13 @@ export function validateRows(rows: readonly RawImportRow[]): ValidImportRow[] {
   return rows.map(({ rowNumber, values }) => {
     const siteIdText = normalize(values['Site ID']);
     const region = normalize(values.Region);
+    const serviceCenter = normalize(values.SC);
     const siteType = parseSiteType(values['Shared Site Or Normal Site']);
     const sectorAddition = parseSector(values['Add sector included or Not']);
     const errors: string[] = [];
     if (!siteIdText) errors.push('Site ID is required.');
     if (!region) errors.push('Region is required.');
+    if (!serviceCenter) errors.push('SC is required.');
     if (!siteType) errors.push('Site type must be Normal or Shared.');
     if (!sectorAddition) errors.push('Sector addition must be Yes or No.');
     if (siteIdText) {
@@ -74,6 +78,7 @@ export function validateRows(rows: readonly RawImportRow[]): ValidImportRow[] {
       rowNumber,
       siteIdText,
       region,
+      serviceCenter,
       siteType: siteType ?? 'NORMAL',
       sectorAddition: sectorAddition ?? 'NO',
       errors,
