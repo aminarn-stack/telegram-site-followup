@@ -1,0 +1,7 @@
+dist
+web-dist
+node_modules
+storage
+playwright-report
+test-results
+prisma/migrations

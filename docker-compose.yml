@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: followup
+      POSTGRES_USER: followup
+      POSTGRES_PASSWORD: followup
+    ports: ['5432:5432']
+    volumes: ['postgres_data:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U followup -d followup']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  app:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://followup:followup@postgres:5432/followup?schema=public
+    ports: ['3000:3000']
+    volumes: ['evidence_data:/app/storage']
+    depends_on:
+      postgres:
+        condition: service_healthy
+  worker:
+    build: .
+    command: ['node', 'dist/src/worker.js']
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://followup:followup@postgres:5432/followup?schema=public
+    volumes: ['evidence_data:/app/storage']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  evidence_data:

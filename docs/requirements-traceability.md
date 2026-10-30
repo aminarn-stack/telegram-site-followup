@@ -1,0 +1,126 @@
+# Requirements traceability
+
+The authoritative source is `Telegram_Mini_App_Bot_Requirements.docx` version 1.0 dated 26 October 2026. Test IDs in this matrix refer to automated tests under `tests/` or the source acceptance case that remains an external production check.
+
+## Import requirements
+
+| Requirement                                | Implementation                                           | Database                                   | API                             | UI                          | Test                                      |
+| ------------------------------------------ | -------------------------------------------------------- | ------------------------------------------ | ------------------------------- | --------------------------- | ----------------------------------------- |
+| IMP-001 `.xlsx` and `.csv`, 1–40 rows      | `parseWorkbook`, multipart size/type limits              | ImportBatch, ImportRow                     | `POST /api/imports`             | Import wizard               | `import.test.ts` row boundaries; AT-01/02 |
+| IMP-002 required four columns              | `REQUIRED_COLUMNS` exact header check                    | ImportRow                                  | `POST /api/imports`             | Preview errors              | `import.test.ts`                          |
+| IMP-003 preserve Site ID as text           | XLSX displayed-text parsing; string domain field         | Site.siteIdText                            | Import/site APIs                | Preview and site list       | AT-03 automated                           |
+| IMP-004 trim and case-insensitive mapping  | `parseSiteType`, `parseSector`                           | normalizedData, AppConfig                  | Import preview                  | Preview                     | `import.test.ts`                          |
+| IMP-005 blanks, invalid values, duplicates | `validateRows` with row-specific messages                | ImportRow.errors                           | Import preview                  | Rejected-row list           | `import.test.ts`; AT-02                   |
+| IMP-006 preview valid/rejected rows        | Preview persisted before business commit                 | Batch counts and ImportRow                 | `GET /api/imports/:id`          | Import preview              | Integration preview test                  |
+| IMP-007 atomic commit                      | Single Prisma transaction                                | Batch, membership, workflow, audit         | `POST /api/imports/:id/commit`  | Commit disabled with errors | AT-02 integration                         |
+| IMP-008 immutable batch metadata/checksum  | SHA-256 and append-only batch                            | ImportBatch                                | Import APIs                     | Batch history               | Integration import test                   |
+| IMP-009 stable repeat identity             | Unique Site.siteIdText and upsert/link                   | Site, SiteBatchMembership                  | Commit                          | Site membership history     | Integration repeat-site test              |
+| IMP-010 preserve active progress           | Commit reuses active workflow                            | SiteWorkflow                               | Commit                          | Site detail                 | Integration repeat-site test              |
+| IMP-011 absent site retained               | No deletion/deactivation during later commit             | Site, memberships                          | Commit                          | Batch/site history          | Integration later-batch test              |
+| IMP-012 changed classification review      | Progress detection and review flag; controlled new cycle | classificationReviewRequired, SiteWorkflow | Reclassification apply endpoint | Batch detail/admin          | AT-17 integration                         |
+| IMP-013 error and accepted summaries       | CSV errors plus batch preview/source                     | ImportRow, ImportBatch                     | errors CSV and batch GET        | Preview/history             | Manual download check                     |
+
+## Workflow and status rules
+
+| Rule                                                                               | Implementation                                        | Database                                     | API                     | UI                                  | Test                         |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------- | ----------------------- | ----------------------------------- | ---------------------------- |
+| Four routes and exact 16/17/17/18 step counts, including final Site Implementation | `WORKFLOW_TEMPLATES`, seed                            | WorkflowTemplate and Step                    | Import commit/templates | Scenario shown in site list         | AT-01, template tests        |
+| Template version retained historically                                             | Active template selected only for new cycle           | SiteWorkflow.templateId                      | Site detail             | Admin template list                 | Seed/integration test        |
+| Locked, Actionable, Completed, Blocked, N/A, Needs Review                          | Pure `recalculate` engine                             | SiteStep.state                               | Step/site endpoints     | Status badges and prerequisite text | workflow unit suite          |
+| Exact answer classification                                                        | `isPositive` and seeded allowedAnswers                | TemplateStep.allowedAnswers; SiteStep.answer | PATCH step              | Answer select                       | answer matrix test           |
+| Permission needed branch                                                           | INITIAL_ACCESS completion makes Permission actionable | SiteStep                                     | PATCH step              | Timeline                            | AT-05                        |
+| Permission not needed branch                                                       | Engine-only N/A; Pre-TSS satisfied                    | SiteStep                                     | PATCH step              | Timeline                            | AT-04                        |
+| Permission unavailable                                                             | Block, descendants lock, one escalation               | SiteStep, Escalation unique siteStepId       | PATCH step              | Block reason                        | AT-06                        |
+| Initial answer change recalculates descendants and retains audit                   | Server transaction and audit append                   | AuditEvent                                   | PATCH/reopen            | History                             | workflow/integration tests   |
+| Negative result blocks                                                             | `isPositive` and recalculation                        | SiteStep, Escalation                         | PATCH step              | Blocked status                      | workflow tests               |
+| Only descendants lock; branches stay independent                                   | Prerequisite graph traversal                          | TemplateStep.prerequisiteCode                | PATCH step              | Timeline                            | AT-08/09/10                  |
+| One active escalation and later resolution                                         | Escalation upsert and resolvedAt                      | Escalation                                   | PATCH step              | Block reason/history                | AT-06/07                     |
+| Contributor cannot reverse prerequisite after downstream work                      | Descendant completion guard                           | Audit/steps                                  | PATCH step              | API error                           | integration guard test       |
+| Admin reopen requires reason; descendants Needs Review                             | `reopenBranch`                                        | Step states and AuditEvent                   | POST reopen             | Admin action API                    | reopen unit/integration test |
+| Site status rules                                                                  | Aggregate state calculation                           | SiteWorkflow.status                          | dashboard/sites         | Counts and status badges            | AT-11                        |
+| Shared sector core branch depends on Sharing request                               | Seed prerequisite `CORE_REQUEST -> SHARING_REQUEST`   | TemplateStep                                 | Site detail             | Timeline                            | AT-09/10                     |
+| Shared sector MR depends on Approved Sharing Result                                | Seed prerequisite `MR_REQUEST -> SHARING_RESULT`      | TemplateStep                                 | Site detail             | Timeline                            | AT-10                        |
+| Normal sector MR depends on civil material                                         | Seed prerequisite `MR_REQUEST -> CIVIL_MATERIAL`      | TemplateStep                                 | Site detail             | Timeline                            | template graph test          |
+
+## Roles and access
+
+| Requirement                            | Implementation                                            | Database                   | API                                   | UI                       | Test                      |
+| -------------------------------------- | --------------------------------------------------------- | -------------------------- | ------------------------------------- | ------------------------ | ------------------------- |
+| Telegram user ID is authorization key  | Signed initData user ID lookup                            | User.telegramUserId unique | auth endpoint                         | Authorization launch     | auth tests                |
+| Administrator permissions              | `requireRole(ADMIN)` and admin routes                     | User.role                  | Imports/admin/audit/reopen            | Admin navigation/screens | authorization integration |
+| Contributor permissions                | Region-filtered read and actionable step/evidence updates | UserRole, UserRegion       | Sites/steps/evidence                  | Sites and update control | authorization integration |
+| Viewer read-only                       | Mutations reject Viewer                                   | User.role                  | Sites/reports only                    | Update controls hidden   | authorization integration |
+| System worker                          | Separate worker with queue/retry                          | Notification               | No public mutation                    | None                     | queue unit/integration    |
+| Allowlist, active state, region access | Auth active check; region guards and query filters        | User.active, UserRegion    | Every protected site/report/file path | Unauthorized/error views | AT-16                     |
+
+## Mini App requirements
+
+| ID                                 | Implementation                                          | Database                  | API                      | UI                                                                        | Test                     |
+| ---------------------------------- | ------------------------------------------------------- | ------------------------- | ------------------------ | ------------------------------------------------------------------------- | ------------------------ |
+| APP-001 launch paths               | Telegram menu/group/reminder web-app buttons and router | DeepLinkToken             | deep-link resolver       | BrowserRouter                                                             | Bot/manual Telegram test |
+| APP-002 server initData validation | HMAC SHA-256, auth age, timing-safe compare             | User                      | `/api/auth/telegram`     | Launch loading/error                                                      | auth unit tests          |
+| APP-003 dashboard totals           | Authorized grouped query                                | SiteWorkflow              | `/api/dashboard`         | Metric cards                                                              | UI E2E                   |
+| APP-004 filters                    | Query validation and Prisma filters                     | Batch/Site/Assignment     | `/api/sites`             | Week/region/type/sector/status/user-capable query; primary controls shown | API integration          |
+| APP-005 Site ID search             | Case-insensitive contains                               | Site.siteIdText           | `/api/sites?search`      | Search field                                                              | UI E2E                   |
+| APP-006 detail content             | Joined metadata, workflow, blocker, evidence, audit     | Site and related entities | `/api/sites/:publicId`   | Site detail timeline/history                                              | UI E2E                   |
+| APP-007 locked disabled/explained  | API rejects and returns prerequisite                    | TemplateStep prerequisite | PATCH step               | No button; requires label                                                 | AT-12                    |
+| APP-008 template answers only      | Allowed-answer server check                             | allowedAnswers            | PATCH step               | Select from allowed answers                                               | integration              |
+| APP-009 negative/override comments | Negative list and reopen validation                     | comment, Audit.reason     | PATCH/reopen             | Comment field                                                             | unit/integration         |
+| APP-010 optional evidence          | Type/size/name/checksum controls                        | StepEvidence              | evidence upload/download | Evidence links; API upload                                                | file integration/manual  |
+| APP-011 save confirmation          | Site ID and step in browser confirmation                | None                      | PATCH after confirm      | Confirmation prompt                                                       | UI E2E                   |
+| APP-012 immediate state refresh    | Mutation invalidates site query                         | Calculated states         | PATCH response + GET     | Timeline refresh                                                          | UI E2E                   |
+| APP-013 admin screens              | Import, batch, admin, audit routes                      | Admin entities            | Admin endpoints          | Admin navigation/screens                                                  | UI E2E                   |
+| APP-014 responsive clients         | Mobile-first CSS and safe-area layout                   | None                      | Same API                 | Telegram/mobile/desktop breakpoints                                       | Playwright Pixel 7       |
+| APP-015 Telegram theme             | Telegram theme CSS variables with fallback contrast     | None                      | None                     | Theme adaptation                                                          | UI/manual contrast       |
+
+## Bot and notification requirements
+
+| ID                                       | Implementation                                                                            | Database                     | API                     | UI                             | Test                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------- | ----------------------- | ------------------------------ | ------------------------------------- |
+| BOT-001 commands                         | grammY `/start`, `/open`, `/summary`, `/remind`, `/export`, `/help`                       | User/sites                   | webhook                 | Telegram messages/files        | Bot handler unit/manual               |
+| BOT-002 launch buttons                   | WebApp InlineKeyboard                                                                     | BotChat                      | webhook                 | Open App button                | Live Telegram check                   |
+| BOT-003 one post-import summary          | Idempotency key per batch/chat                                                            | Notification                 | commit queues           | Telegram group                 | AT-15 external/integration            |
+| BOT-004 aggregate reminders              | Worker counts actionable steps on Not Started/In Progress sites; `/remind` runs on demand | Notification                 | Worker/webhook          | One reminder per schedule/chat | reminder unit test                    |
+| BOT-005 escalation/resolution/completion | Transactional queue from recalculation                                                    | Escalation, Notification     | PATCH step              | Telegram + site detail         | AT-06/07 and completion check         |
+| BOT-006 opaque deep link                 | Random token/hash lookup; public IDs never DB IDs                                         | DeepLinkToken, Site.publicId | resolver                | Router                         | token test                            |
+| BOT-007 authorize commands/callbacks     | Database allowlist in every command                                                       | User                         | webhook                 | Denial message                 | AT-16 bot check                       |
+| BOT-008 privacy mode                     | Operating instruction; no ordinary message handler                                        | None                         | Webhook allowed updates | README                         | Deployment checklist                  |
+| BOT-009 bounded retry                    | Five attempts and exponential delay                                                       | Notification attempts/error  | Worker                  | Admin/audit visibility         | queue test                            |
+| BOT-010 rate-safe queue                  | DB queue processes bounded batches                                                        | Notification                 | Worker                  | None                           | queue load test                       |
+| Required message content                 | Dedicated formatter for import, reminder, escalation, resolution, completion              | Notification.payload         | Worker                  | Telegram                       | formatter tests/manual weekly summary |
+
+## Security and operational requirements
+
+| ID/area                    | Implementation                                                            | Database                | API                          | UI                                       | Test                         |
+| -------------------------- | ------------------------------------------------------------------------- | ----------------------- | ---------------------------- | ---------------------------------------- | ---------------------------- |
+| SEC-001                    | Telegram signature and expiry validation                                  | No raw initData stored  | Auth                         | Unauthorized view                        | auth tests                   |
+| SEC-002                    | HTTPS deployment and reverse proxy guidance                               | None                    | production URL               | Telegram                                 | deployment check             |
+| SEC-003                    | Environment-only secrets and `.gitignore`                                 | None                    | Startup config               | None                                     | secret scan                  |
+| SEC-004                    | Role/region checks on API, bot, files, reports                            | UserRegion              | All endpoints                | Controls hidden secondarily              | AT-16                        |
+| SEC-005                    | Site public UUID and hashed link tokens                                   | publicId, tokenHash     | Site/deep link               | Opaque routes                            | IDOR integration             |
+| SEC-006                    | Allowlist types, byte limits, safe names, SHA-256, attachment disposition | file metadata           | imports/evidence             | Validation errors                        | upload tests                 |
+| SEC-007                    | Auth denial logs, imports, updates, overrides, notification failures      | AuditEvent/Notification | Error handler/routes         | Audit screen                             | audit tests                  |
+| SEC-008                    | DateTime UTC storage; configured timezone formatting                      | DateTime/AppConfig      | JSON UTC                     | Local display                            | timezone unit                |
+| SEC-009                    | Daily backup and seven-day/restore runbook                                | External backup         | N/A                          | N/A                                      | AT-18 external               |
+| SEC-010                    | initData used only in request memory                                      | None                    | Auth                         | None                                     | code review                  |
+| Performance/update latency | Indexed queries, 40-row bound, transaction recalculation                  | indexes                 | dashboard/sites/step         | immediate refresh                        | load test target p95 <2s     |
+| 99.5% availability         | Single-VPS services with health check/process separation                  | PostgreSQL              | `/api/health`                | N/A                                      | external monitoring          |
+| Observability              | Pino JSON, request IDs, persistent notification errors                    | Notification/Audit      | all errors include requestId | Audit                                    | logging test                 |
+| Concurrency                | Expected version comparison in transaction                                | SiteStep.version        | PATCH                        | conflict message                         | AT-13                        |
+| Accessibility              | semantic labels, keyboard controls, text statuses                         | None                    | N/A                          | no color-only state; responsive controls | Playwright/manual WCAG check |
+
+## Acceptance criteria
+
+| Test        | Automated coverage and result target                                                                            |
+| ----------- | --------------------------------------------------------------------------------------------------------------- |
+| AT-01       | Template routing/step-count unit test and import integration.                                                   |
+| AT-02       | Import validation unit test and atomic transaction integration.                                                 |
+| AT-03       | Import unit test preserves `001001`.                                                                            |
+| AT-04–AT-11 | Workflow engine unit suite covers permission, blocking, recovery, independent branches, and completion.         |
+| AT-12       | Step service integration rejects Locked with prerequisite code.                                                 |
+| AT-13       | Step service integration verifies stale version conflict.                                                       |
+| AT-14       | Step service integration asserts full audit payload and request ID.                                             |
+| AT-15       | Commit integration asserts exactly one idempotent group notification; live link requires Telegram credentials.  |
+| AT-16       | API authorization tests plus live bot/deep-link verification procedure.                                         |
+| AT-17       | Import integration checks classification review and admin new cycle.                                            |
+| AT-18       | External deployment restore test described in README; cannot run without production-like backup infrastructure. |

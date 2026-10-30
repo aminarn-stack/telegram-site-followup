@@ -1,0 +1,315 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CONTRIBUTOR
+  VIEWER
+  SYSTEM
+}
+
+enum SiteType {
+  NORMAL
+  SHARED
+}
+
+enum SectorAddition {
+  YES
+  NO
+}
+
+enum BatchStatus {
+  PREVIEW
+  COMMITTED
+  REJECTED
+  FAILED
+}
+
+enum WorkflowState {
+  LOCKED
+  ACTIONABLE
+  COMPLETED
+  BLOCKED
+  NOT_APPLICABLE
+  NEEDS_REVIEW
+}
+
+enum SiteStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+}
+
+enum NotificationState {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+model User {
+  id              String   @id @default(uuid())
+  telegramUserId  BigInt   @unique
+  firstName       String
+  lastName        String?
+  username        String?
+  role            Role     @default(VIEWER)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  regions         UserRegion[]
+  assignedSites   SiteAssignment[]
+  uploadedBatches ImportBatch[] @relation("BatchUploader")
+  stepUpdates     SiteStep[] @relation("StepUpdater")
+  evidence        StepEvidence[]
+  auditEvents     AuditEvent[] @relation("AuditActor")
+}
+
+model Region {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  users     UserRegion[]
+  sites     Site[]
+}
+
+model UserRegion {
+  userId   String
+  regionId String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  region   Region @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  @@id([userId, regionId])
+}
+
+model BotChat {
+  id               String   @id @default(uuid())
+  telegramChatId   BigInt   @unique
+  chatType         String
+  groupName        String?
+  active           Boolean  @default(true)
+  importSummaries  Boolean  @default(true)
+  reminders        Boolean  @default(true)
+  escalations      Boolean  @default(true)
+  timezone         String   @default("Asia/Tehran")
+  reminderSchedule String   @default("0 9 * * 1,3")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model ImportBatch {
+  id             String      @id @default(uuid())
+  reportingWeek  DateTime
+  sourceFilename String
+  storageKey     String
+  checksum       String
+  uploaderId     String
+  uploader       User        @relation("BatchUploader", fields: [uploaderId], references: [id])
+  status         BatchStatus @default(PREVIEW)
+  totalRows      Int
+  acceptedRows   Int
+  rejectedRows   Int
+  createdAt      DateTime    @default(now())
+  committedAt    DateTime?
+  rows           ImportRow[]
+  memberships    SiteBatchMembership[]
+  @@index([reportingWeek])
+}
+
+model ImportRow {
+  id             String      @id @default(uuid())
+  batchId        String
+  batch          ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rowNumber      Int
+  siteIdText     String?
+  regionText     String?
+  siteTypeText   String?
+  sectorText     String?
+  normalizedData Json?
+  errors         Json
+  valid          Boolean
+  @@unique([batchId, rowNumber])
+}
+
+model Site {
+  id             String         @id @default(uuid())
+  publicId       String         @unique @default(uuid())
+  siteIdText     String         @unique
+  regionId       String
+  region         Region         @relation(fields: [regionId], references: [id])
+  siteType       SiteType
+  sectorAddition SectorAddition
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  memberships    SiteBatchMembership[]
+  workflows      SiteWorkflow[]
+  assignedUsers  SiteAssignment[]
+  @@index([regionId, siteIdText])
+}
+
+model SiteAssignment {
+  siteId String
+  userId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([siteId, userId])
+}
+
+model SiteBatchMembership {
+  id                           String         @id @default(uuid())
+  batchId                      String
+  siteId                       String
+  batch                        ImportBatch    @relation(fields: [batchId], references: [id])
+  site                         Site           @relation(fields: [siteId], references: [id])
+  sourceRow                    Int
+  importedSiteType             SiteType
+  importedSectorAddition       SectorAddition
+  classificationReviewRequired Boolean        @default(false)
+  createdAt                    DateTime        @default(now())
+  @@unique([batchId, siteId])
+}
+
+model WorkflowTemplate {
+  id             String         @id @default(uuid())
+  code           String
+  version        Int
+  siteType       SiteType
+  sectorAddition SectorAddition
+  active         Boolean        @default(true)
+  effectiveFrom  DateTime       @default(now())
+  effectiveTo    DateTime?
+  steps          WorkflowTemplateStep[]
+  workflows      SiteWorkflow[]
+  @@unique([code, version])
+  @@unique([siteType, sectorAddition, version])
+}
+
+model WorkflowTemplateStep {
+  id               String           @id @default(uuid())
+  templateId       String
+  template         WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  code             String
+  displayOrder     Int
+  label            String
+  prerequisiteCode String?
+  stepType         String
+  allowedAnswers   Json
+  siteSteps        SiteStep[]
+  @@unique([templateId, code])
+  @@unique([templateId, displayOrder])
+}
+
+model SiteWorkflow {
+  id          String           @id @default(uuid())
+  siteId      String
+  site        Site             @relation(fields: [siteId], references: [id])
+  templateId  String
+  template    WorkflowTemplate @relation(fields: [templateId], references: [id])
+  cycleNumber Int              @default(1)
+  active      Boolean          @default(true)
+  status      SiteStatus       @default(NOT_STARTED)
+  startedAt   DateTime         @default(now())
+  completedAt DateTime?
+  steps       SiteStep[]
+  @@unique([siteId, cycleNumber])
+  @@index([siteId, active])
+}
+
+model SiteStep {
+  id             String               @id @default(uuid())
+  workflowId     String
+  workflow       SiteWorkflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  templateStepId String
+  templateStep   WorkflowTemplateStep @relation(fields: [templateStepId], references: [id])
+  answer         String?
+  state          WorkflowState
+  comment        String?
+  updatedById    String?
+  updatedBy      User?                @relation("StepUpdater", fields: [updatedById], references: [id])
+  version        Int                  @default(0)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  evidence       StepEvidence[]
+  escalation     Escalation?
+  @@unique([workflowId, templateStepId])
+  @@index([workflowId, state])
+}
+
+model StepEvidence {
+  id               String   @id @default(uuid())
+  siteStepId       String
+  siteStep         SiteStep @relation(fields: [siteStepId], references: [id])
+  storageKey       String
+  originalFilename String
+  mediaType        String
+  size             Int
+  checksum         String
+  uploaderId       String
+  uploader         User     @relation(fields: [uploaderId], references: [id])
+  createdAt        DateTime @default(now())
+}
+
+model Escalation {
+  id                String   @id @default(uuid())
+  siteStepId        String   @unique
+  siteStep          SiteStep @relation(fields: [siteStepId], references: [id])
+  reason            String
+  openedAt          DateTime @default(now())
+  resolvedAt        DateTime?
+  notificationState String   @default("PENDING")
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id])
+  entityType String
+  entityId   String
+  action     String
+  oldValue   Json?
+  newValue   Json?
+  reason     String?
+  requestId  String
+  createdAt  DateTime @default(now())
+  @@index([entityType, entityId, createdAt])
+  @@index([requestId])
+}
+
+model Notification {
+  id                String            @id @default(uuid())
+  idempotencyKey    String            @unique
+  recipientChatId   BigInt
+  messageType       String
+  payload           Json
+  state             NotificationState @default(PENDING)
+  attempts          Int               @default(0)
+  telegramMessageId BigInt?
+  lastError         String?
+  nextAttemptAt     DateTime           @default(now())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  @@index([state, nextAttemptAt])
+}
+
+model DeepLinkToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  target    Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model AppConfig {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
