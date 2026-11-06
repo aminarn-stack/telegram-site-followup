@@ -1,6 +1,6 @@
 {
   "name": "telegram-site-followup",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
@@ -27,7 +27,8 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:validate": "prisma validate",
-    "sample:import": "node scripts/create-sample-import.mjs"
+    "sample:import": "node scripts/create-sample-import.mjs",
+    "telegram:configure": "node scripts/configure-telegram.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.1.0",

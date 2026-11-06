@@ -76,6 +76,128 @@ docker compose up --build
 
 The Compose file runs PostgreSQL, the API/Mini App service, and a separate notification worker.
 
+## VPS deployment without a domain
+
+The production app can use a static public IPv4 address instead of a domain. Telegram still
+requires an HTTPS Mini App URL and an HTTPS webhook, so plain `http://<ip>` is not supported. This
+deployment uses a publicly trusted, six-day Let's Encrypt IP certificate. It requires Certbot 5.4
+or newer, automatic renewal, ports 80 and 443, and a static public IPv4 address.
+
+1. Copy the example environment and use the VPS IP as both public origins:
+
+   ```bash
+   export PUBLIC_IP=203.0.113.10
+   cp .env.example .env
+   ```
+
+   Set these production values in `.env`:
+
+   ```dotenv
+   NODE_ENV=production
+   WEB_ORIGIN=https://203.0.113.10
+   PUBLIC_BASE_URL=https://203.0.113.10
+   POSTGRES_PASSWORD=<random-hex-password>
+   JWT_SECRET=<at-least-32-random-characters>
+   TELEGRAM_BOT_TOKEN=<botfather-token>
+   TELEGRAM_WEBHOOK_SECRET=<letters-numbers-underscore-or-hyphen>
+   DEFAULT_ADMIN_TELEGRAM_ID=<numeric-telegram-user-id>
+   TRUST_PROXY=true
+   ```
+
+   Generate URL-safe secrets with `openssl rand -hex 32` and protect the file with
+   `chmod 600 .env`.
+
+2. Start the database, API, and worker. PostgreSQL is not published and the API is bound only to
+   the VPS loopback interface:
+
+   ```bash
+   docker compose -f docker-compose.ip.yml config
+   docker compose -f docker-compose.ip.yml up -d --build
+   docker compose -f docker-compose.ip.yml exec app pnpm db:seed
+   curl http://127.0.0.1:3000/api/health
+   ```
+
+3. Install Nginx, create the ACME webroot, and start with the HTTP bootstrap configuration:
+
+   ```bash
+   sudo apt update
+   sudo apt install -y nginx snapd
+   sudo mkdir -p /var/www/certbot
+   sudo cp deploy/ip/nginx-bootstrap.conf /etc/nginx/sites-available/telegram-followup
+   sudo ln -sfn /etc/nginx/sites-available/telegram-followup /etc/nginx/sites-enabled/telegram-followup
+   sudo rm -f /etc/nginx/sites-enabled/default
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+4. Install a current Certbot. The Ubuntu package may be too old for IP certificates, so use the
+   maintained snap and verify that the result is 5.4 or newer:
+
+   ```bash
+   sudo snap install core
+   sudo snap refresh core
+   sudo snap install --classic certbot
+   sudo snap refresh certbot
+   /snap/bin/certbot --version
+   ```
+
+5. Test issuance against staging first, then request the trusted certificate. Replace the IP and
+   email in both commands:
+
+   ```bash
+   sudo /snap/bin/certbot certonly --staging \
+     --preferred-profile shortlived \
+     --webroot --webroot-path /var/www/certbot \
+     --ip-address 203.0.113.10 \
+     --agree-tos -m admin@example.com --no-eff-email
+
+   sudo /snap/bin/certbot certonly \
+     --preferred-profile shortlived \
+     --webroot --webroot-path /var/www/certbot \
+     --ip-address 203.0.113.10 \
+     --agree-tos -m admin@example.com --no-eff-email
+   ```
+
+6. Render the HTTPS Nginx configuration and reload Nginx:
+
+   ```bash
+   sed "s/__PUBLIC_IP__/${PUBLIC_IP}/g" deploy/ip/nginx-https.conf.template | \
+     sudo tee /etc/nginx/sites-available/telegram-followup >/dev/null
+   sudo nginx -t
+   sudo systemctl reload nginx
+   curl "https://${PUBLIC_IP}/api/health"
+   ```
+
+7. IP certificates last six days. Add a deploy hook so Nginx reloads after every automatic renewal,
+   and verify the Certbot timer and renewal process:
+
+   ```bash
+   sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+   printf '#!/bin/sh\nsystemctl reload nginx\n' | \
+     sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx >/dev/null
+   sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+   systemctl list-timers | grep certbot
+   sudo /snap/bin/certbot renew --dry-run
+   ```
+
+8. Configure the HTTPS IP webhook, Mini App menu button, and bot commands automatically:
+
+   ```bash
+   docker compose -f docker-compose.ip.yml exec app pnpm telegram:configure
+   ```
+
+9. Verify the public endpoint and deployment:
+
+   ```bash
+   curl "https://${PUBLIC_IP}/api/health"
+   docker compose -f docker-compose.ip.yml ps
+   docker compose -f docker-compose.ip.yml logs --tail=100 app worker
+   ```
+
+The certificate is tied to the IP. If the VPS public IP changes, update `PUBLIC_BASE_URL` and
+`WEB_ORIGIN`, issue a certificate for the new IP, render the Nginx template again, rebuild the
+containers, and rerun `pnpm telegram:configure` inside the app container.
+
 ## Telegram bot configuration
 
 1. Create the bot with BotFather and keep privacy mode enabled.

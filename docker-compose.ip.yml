@@ -1,0 +1,62 @@
+name: telegram-followup
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: followup
+      POSTGRES_USER: followup
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U followup -d followup']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://followup:${POSTGRES_PASSWORD}@postgres:5432/followup?schema=public
+      TRUST_PROXY: 'true'
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - evidence_data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build: .
+    restart: unless-stopped
+    init: true
+    command: ['node', 'dist/src/worker.js']
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://followup:${POSTGRES_PASSWORD}@postgres:5432/followup?schema=public
+    volumes:
+      - evidence_data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  evidence_data:

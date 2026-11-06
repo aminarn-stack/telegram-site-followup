@@ -18,7 +18,11 @@ import { telegramRoutes } from './routes/telegram.js';
 
 export async function buildServer() {
   const config = loadConfig();
-  const app = Fastify({ logger: { level: config.LOG_LEVEL }, genReqId: () => crypto.randomUUID() });
+  const app = Fastify({
+    logger: { level: config.LOG_LEVEL },
+    genReqId: () => crypto.randomUUID(),
+    trustProxy: config.TRUST_PROXY,
+  });
   await app.register(cors, { origin: config.WEB_ORIGIN, credentials: false });
   await app.register(rateLimit, {
     max: 120,

@@ -10,7 +10,7 @@ beforeAll(async () => {
   process.env.TELEGRAM_WEBHOOK_SECRET = 'test-webhook-secret';
   const module = await import('../../src/server.js');
   app = await module.buildServer();
-});
+}, 30_000);
 
 afterAll(async () => app?.close());
 

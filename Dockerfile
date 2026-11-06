@@ -15,5 +15,6 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/web-dist ./web-dist
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/scripts ./scripts
 EXPOSE 3000
 CMD ["sh", "-c", "pnpm db:migrate && node dist/src/server.js"]

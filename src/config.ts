@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+const environmentBoolean = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  if (value.toLowerCase() === 'true') return true;
+  if (value.toLowerCase() === 'false') return false;
+  return value;
+}, z.boolean());
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -15,6 +22,7 @@ const schema = z.object({
   MAX_EVIDENCE_BYTES: z.coerce.number().int().positive().default(10_485_760),
   APP_TIMEZONE: z.string().default('Asia/Tehran'),
   LOG_LEVEL: z.string().default('info'),
+  TRUST_PROXY: environmentBoolean.default(false),
 });
 
 export type Config = z.infer<typeof schema>;
