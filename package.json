@@ -1,6 +1,6 @@
 {
   "name": "telegram-site-followup",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
@@ -26,6 +26,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:prod": "node dist/prisma/seed.js",
     "db:validate": "prisma validate",
     "sample:import": "node scripts/create-sample-import.mjs",
     "telegram:configure": "node scripts/configure-telegram.mjs"

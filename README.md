@@ -58,7 +58,7 @@ pnpm install --frozen-lockfile
 pnpm db:generate
 pnpm build
 pnpm db:migrate
-pnpm db:seed
+pnpm db:seed:prod
 pnpm start
 pnpm start:worker
 ```
@@ -113,7 +113,7 @@ or newer, automatic renewal, ports 80 and 443, and a static public IPv4 address.
    ```bash
    docker compose -f docker-compose.ip.yml config
    docker compose -f docker-compose.ip.yml up -d --build
-   docker compose -f docker-compose.ip.yml exec app pnpm db:seed
+   docker compose -f docker-compose.ip.yml exec app node dist/prisma/seed.js
    curl http://127.0.0.1:3000/api/health
    ```
 
@@ -183,7 +183,7 @@ or newer, automatic renewal, ports 80 and 443, and a static public IPv4 address.
 8. Configure the HTTPS IP webhook, Mini App menu button, and bot commands automatically:
 
    ```bash
-   docker compose -f docker-compose.ip.yml exec app pnpm telegram:configure
+   docker compose -f docker-compose.ip.yml exec app node scripts/configure-telegram.mjs
    ```
 
 9. Verify the public endpoint and deployment:
@@ -196,7 +196,7 @@ or newer, automatic renewal, ports 80 and 443, and a static public IPv4 address.
 
 The certificate is tied to the IP. If the VPS public IP changes, update `PUBLIC_BASE_URL` and
 `WEB_ORIGIN`, issue a certificate for the new IP, render the Nginx template again, rebuild the
-containers, and rerun `pnpm telegram:configure` inside the app container.
+containers, and rerun `node scripts/configure-telegram.mjs` inside the app container.
 
 ## Telegram bot configuration
 
