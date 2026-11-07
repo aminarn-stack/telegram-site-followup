@@ -15,9 +15,11 @@ import { siteRoutes } from './routes/sites.js';
 import { reportRoutes } from './routes/reports.js';
 import { adminRoutes } from './routes/admin.js';
 import { telegramRoutes } from './routes/telegram.js';
+import { createBot } from './bot.js';
 
 export async function buildServer() {
   const config = loadConfig();
+  const bot = createBot(config);
   const app = Fastify({
     logger: { level: config.LOG_LEVEL },
     genReqId: () => crypto.randomUUID(),
@@ -39,9 +41,9 @@ export async function buildServer() {
   await authRoutes(app, config);
   await importRoutes(app, config);
   await siteRoutes(app, config);
-  await reportRoutes(app);
+  await reportRoutes(app, bot?.api);
   await adminRoutes(app);
-  await telegramRoutes(app, config);
+  await telegramRoutes(app, config, bot);
 
   app.setErrorHandler((error, request, reply) => {
     const requestId = request.id;

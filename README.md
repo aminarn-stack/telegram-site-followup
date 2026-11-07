@@ -223,6 +223,10 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
    can use a private bot chat or the web dashboard for an all-SC view and export; the workbook
    includes an overview sheet by team/SC.
 
+In groups with privacy mode enabled, address commands to the bot, for example
+`/export@YourBotUsername`. The group’s Open button leads to the bot’s private chat, where you can
+launch the Mini App. Start the private chat once to receive dashboard Excel exports there.
+
 ### Workflow licensing branch
 
 - Every flow includes **License required** immediately after **BP issuance by RMPS**.

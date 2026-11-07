@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard, InputFile, type Context } from 'grammy';
+import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy';
 import type { Prisma, Role } from '@prisma/client';
 import type { Config } from './config.js';
 import { prisma } from './db.js';
@@ -11,6 +11,19 @@ function launchKeyboard(config: Config, startParam?: string) {
   const url = new URL(config.PUBLIC_BASE_URL);
   if (startParam) url.searchParams.set('startapp', startParam);
   return new InlineKeyboard().webApp('Open App', url.toString());
+}
+
+function privateChatKeyboard(username: string, startParam = 'open') {
+  return new InlineKeyboard().url(
+    'Open bot in private',
+    `https://t.me/${username}?start=${startParam}`,
+  );
+}
+
+function commandKeyboard(ctx: Context, config: Config, startParam?: string) {
+  return ctx.chat?.type === 'private'
+    ? launchKeyboard(config, startParam)
+    : privateChatKeyboard(ctx.me.username, startParam);
 }
 
 async function authorizedUser(telegramUserId?: number) {
@@ -85,14 +98,17 @@ export function createBot(config: Config) {
   bot.command('start', async (ctx) => {
     const scope = await commandScope(ctx);
     if ('error' in scope) return ctx.reply(scope.error);
+    const startParam = /^[A-Za-z0-9_-]{20,64}$/.test(ctx.match) ? ctx.match : undefined;
     return ctx.reply('Open the weekly site follow-up workspace.', {
-      reply_markup: launchKeyboard(config),
+      reply_markup: commandKeyboard(ctx, config, startParam),
     });
   });
   bot.command('open', async (ctx) => {
     const scope = await commandScope(ctx);
     if ('error' in scope) return ctx.reply(scope.error);
-    return ctx.reply('Open the site follow-up app.', { reply_markup: launchKeyboard(config) });
+    return ctx.reply('Open the site follow-up app.', {
+      reply_markup: commandKeyboard(ctx, config),
+    });
   });
   bot.command('help', async (ctx) => {
     const scope = await commandScope(ctx);
@@ -138,7 +154,7 @@ export function createBot(config: Config) {
       `Blockers by step: ${formatCounts(blockersByStep)}`,
       `Blockers by region: ${formatCounts(blockersByRegion)}`,
     ].join('\n');
-    return ctx.reply(text, { reply_markup: launchKeyboard(config) });
+    return ctx.reply(text, { reply_markup: commandKeyboard(ctx, config) });
   });
   bot.command('remind', async (ctx) => {
     const scope = await commandScope(ctx);
@@ -149,33 +165,38 @@ export function createBot(config: Config) {
       { recipient: scope.chat?.groupName ?? scope.user.firstName, ...stats },
       config.APP_TIMEZONE,
     );
-    return ctx.reply(text, { reply_markup: launchKeyboard(config) });
+    return ctx.reply(text, { reply_markup: commandKeyboard(ctx, config) });
   });
-  bot.command('export', async (ctx) => {
-    const scope = await commandScope(ctx);
-    if ('error' in scope) return ctx.reply(scope.error);
-    await ctx.replyWithChatAction('upload_document');
-    const report = await createCurrentStatusExport({
-      role: scope.serviceCenters === null ? scope.user.role : 'VIEWER',
-      serviceCenters: scope.serviceCenters ?? [],
+  const reports = [
+    ['export', createCurrentStatusExport, 'Current site status with detailed steps'],
+    ['flowexport', createSiteFlowExport, 'Sites by SC and region with current and next steps'],
+  ] as const;
+  for (const [command, createExport, caption] of reports) {
+    bot.command(command, async (ctx) => {
+      const scope = await commandScope(ctx);
+      if ('error' in scope) return ctx.reply(scope.error);
+      try {
+        const report = await createExport({
+          role: scope.serviceCenters === null ? scope.user.role : 'VIEWER',
+          serviceCenters: scope.serviceCenters ?? [],
+        });
+        return await ctx.replyWithDocument(new InputFile(report.buffer, report.filename), {
+          caption: `${caption} (${report.siteCount} sites).`,
+        });
+      } catch (error) {
+        console.error('Telegram export failed', {
+          command,
+          reason:
+            error instanceof GrammyError
+              ? error.description
+              : error instanceof Error
+                ? error.name
+                : 'Unknown error',
+        });
+        return ctx.reply('Could not send the Excel report. Please try again.');
+      }
     });
-    return ctx.replyWithDocument(new InputFile(report.buffer, report.filename), {
-      caption: `Current site status with detailed steps (${report.siteCount} sites).`,
-    });
-  });
-  bot.command('flowexport', async (ctx) => {
-    const scope = await commandScope(ctx);
-    if ('error' in scope) return ctx.reply(scope.error);
-    await ctx.replyWithChatAction('upload_document');
-    const report = await createSiteFlowExport({
-      role: scope.serviceCenters === null ? scope.user.role : 'VIEWER',
-      serviceCenters: scope.serviceCenters ?? [],
-    });
-    return ctx.replyWithDocument(new InputFile(report.buffer, report.filename), {
-      caption: `Sites by SC and region with current and next steps (${report.siteCount} sites).`,
-    });
-  });
-  bot.catch((error) => console.error('Telegram bot update failed', error));
+  }
   return bot;
 }
 
@@ -203,8 +224,12 @@ export async function processNotificationQueue(config: Config) {
       const startParam = payload.deepLinkTarget
         ? await createDeepLink(payload.deepLinkTarget as Record<string, unknown>)
         : undefined;
+      const isGroup = notification.recipientChatId < 0n;
+      if (isGroup) await bot.init();
       const result = await bot.api.sendMessage(notification.recipientChatId.toString(), text, {
-        reply_markup: launchKeyboard(config, startParam),
+        reply_markup: isGroup
+          ? privateChatKeyboard(bot.botInfo.username, startParam)
+          : launchKeyboard(config, startParam),
       });
       await prisma.notification.update({
         where: { id: notification.id },

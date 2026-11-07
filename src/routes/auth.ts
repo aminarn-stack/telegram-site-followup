@@ -7,7 +7,11 @@ import { AppError } from '../lib/errors.js';
 
 const bodySchema = z.object({ initData: z.string().min(1) });
 
-async function issueSession(app: FastifyInstance, telegramUserId: bigint) {
+async function issueSession(
+  app: FastifyInstance,
+  telegramUserId: bigint,
+  telegramVerified = false,
+) {
   const user = await prisma.user.findUnique({
     where: { telegramUserId },
     include: {
@@ -23,6 +27,7 @@ async function issueSession(app: FastifyInstance, telegramUserId: bigint) {
     {
       sub: user.id,
       telegramUserId: user.telegramUserId.toString(),
+      telegramVerified,
       role: user.role,
       regions,
       serviceCenters,
@@ -55,7 +60,7 @@ export async function authRoutes(app: FastifyInstance, config: Config) {
       config.TELEGRAM_BOT_TOKEN,
       config.TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
     );
-    const result = await issueSession(app, BigInt(telegram.id));
+    const result = await issueSession(app, BigInt(telegram.id), true);
     await prisma.user.update({
       where: { id: result.user.id },
       data: {

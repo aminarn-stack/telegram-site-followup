@@ -109,3 +109,47 @@ test('shows the Telegram mobile dashboard with status counts and site IDs', asyn
   await expect(page.getByRole('button', { name: 'Current and next steps export' })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible();
 });
+
+test('keeps site ID search and links to each site across pages', async ({ page }) => {
+  await page.route(
+    (url) => url.pathname === '/api/sites',
+    (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      const pageNumber = Number(params.get('page') ?? 1);
+      const search = params.get('search');
+      const siteId = pageNumber === 2 || search ? '001026' : '001001';
+      return route.fulfill({
+        json: {
+          items: [
+            {
+              id: siteId,
+              status: 'NOT_STARTED',
+              site: {
+                publicId: siteId,
+                siteIdText: siteId,
+                serviceCenter: { code: 'SC-A' },
+                region: { code: 'North' },
+                siteType: 'NORMAL',
+                sectorAddition: 'NO',
+              },
+              progress: { completed: 0, total: 5 },
+            },
+          ],
+          total: search ? 1 : 26,
+          page: pageNumber,
+          pageSize: 25,
+        },
+      });
+    },
+  );
+  await page.goto('/sites');
+  await expect(page.getByRole('textbox')).toHaveCount(1);
+  await expect(page.getByRole('combobox')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /001001/ })).toHaveAttribute('href', '/sites/001001');
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByText('Page 2 of 2')).toBeVisible();
+  await expect(page.getByRole('link', { name: /001026/ })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Search site ID' }).fill('001026');
+  await expect(page).toHaveURL(/\/sites\?search=001026$/);
+  await expect(page.getByRole('link', { name: /001026/ })).toHaveAttribute('href', '/sites/001026');
+});
