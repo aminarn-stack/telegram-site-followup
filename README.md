@@ -214,8 +214,8 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 5. Seed the first administrator with `DEFAULT_ADMIN_TELEGRAM_ID`, then use Administration to add
    users, SC access, and every team/SC Telegram group. Each group must be assigned at least one
    service center; unassigned groups receive no site data.
-6. Register `/start`, `/open`, `/summary`, `/remind`, `/export`, `/flowexport`, and `/help` through
-   BotFather. `/export` sends the current site summary and status of every workflow step.
+6. Register `/start`, `/open`, `/summary`, `/remind`, `/export`, `/flowexport`, `/pending`, and
+   `/help` through BotFather. `/export` sends the current site summary and the status of each step.
    `/flowexport` sends a second workbook ordered by SC, Region, and Site ID with each site's current
    steps, statuses, answers, and directly dependent next steps. `/summary`, `/remind`, scheduled
    reminders, import summaries, blocker alerts, resolutions, and completion messages use the same
@@ -226,6 +226,19 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 In groups with privacy mode enabled, address commands to the bot, for example
 `/export@YourBotUsername`. The group’s Open button leads to the bot’s private chat, where you can
 launch the Mini App. Start the private chat once to receive dashboard Excel exports there.
+
+### Pending cases by owner
+
+`/pending` sends a scoped Excel workbook with one row per pending step and a count of affected
+sites for each owner. A site can be counted for both owners. Run the Telegram configuration script
+again after upgrading to add `/pending` to the bot’s command menu.
+
+MTNI owns Installation plan by RND, BP issuance by RMPS, Core/SID/CGI/IP receipt, Material delivery,
+and Sharing result. Contractor owns the remaining steps. Pending time covers the current continuous
+period a step is actionable, blocked, or needs review. Each site card and export summary shows
+the oldest pending step for each owner. Step Details shows the time for each individual step.
+A lower bound means an existing step was already pending at its last saved timestamp before the
+upgrade.
 
 ### Workflow licensing branch
 
