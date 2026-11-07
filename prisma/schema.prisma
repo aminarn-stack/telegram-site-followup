@@ -273,6 +273,8 @@ model SiteStep {
   version        Int                  @default(0)
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
+  pendingSince   DateTime?
+  pendingSinceEstimated Boolean @default(false)
   evidence       StepEvidence[]
   escalation     Escalation?
   @@unique([workflowId, templateStepId])

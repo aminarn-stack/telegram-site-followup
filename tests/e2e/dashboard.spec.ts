@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+const pendingByOwner = {
+  MTNI: { since: '2026-11-03T12:00:00.000Z', minutes: 1500, estimated: true },
+  Contractor: null,
+};
+
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/auth/dev', (route) =>
     route.fulfill({
@@ -39,6 +44,7 @@ test.beforeEach(async ({ page }) => {
               siteIdText: '001001',
               region: 'North',
               serviceCenter: 'SC-A',
+              pendingByOwner,
               actionableSteps: ['Initial access assessment'],
             },
           ],
@@ -48,6 +54,7 @@ test.beforeEach(async ({ page }) => {
               siteIdText: '001002',
               region: 'North',
               serviceCenter: 'SC-A',
+              pendingByOwner,
               actionableSteps: ['Pre-TSS'],
             },
           ],
@@ -57,6 +64,7 @@ test.beforeEach(async ({ page }) => {
               siteIdText: '001004',
               region: 'South',
               serviceCenter: 'SC-B',
+              pendingByOwner,
               actionableSteps: [],
             },
           ],
@@ -66,6 +74,7 @@ test.beforeEach(async ({ page }) => {
               siteIdText: '001003',
               region: 'South',
               serviceCenter: 'SC-B',
+              pendingByOwner,
               actionableSteps: [],
             },
           ],
@@ -105,6 +114,9 @@ test('shows the Telegram mobile dashboard with status counts and site IDs', asyn
   await expect(page.getByRole('heading', { name: 'Weekly overview' })).toBeVisible();
   await expect(page.getByText('4', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('001004')).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: /001004/ }).getByText('MTNI pending: at least 1d 1h'),
+  ).toBeVisible();
   await expect(page.getByText('SC-A', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Current and next steps export' })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible();
@@ -133,6 +145,7 @@ test('keeps site ID search and links to each site across pages', async ({ page }
                 sectorAddition: 'NO',
               },
               progress: { completed: 0, total: 5 },
+              pendingByOwner,
             },
           ],
           total: search ? 1 : 26,
@@ -141,6 +154,32 @@ test('keeps site ID search and links to each site across pages', async ({ page }
         },
       });
     },
+  );
+  await page.route('**/api/sites/001026', (route) =>
+    route.fulfill({
+      json: {
+        siteIdText: '001026',
+        siteType: 'NORMAL',
+        sectorAddition: 'NO',
+        serviceCenter: { code: 'SC-A' },
+        region: { code: 'North' },
+        workflow: {
+          status: 'IN_PROGRESS',
+          pendingByOwner,
+          steps: [
+            {
+              id: 'step-1',
+              state: 'ACTIONABLE',
+              owner: 'MTNI',
+              pendingAge: pendingByOwner.MTNI,
+              templateStep: { code: 'INSTALLATION_PLAN', label: 'Installation plan by RND' },
+              evidence: [],
+            },
+          ],
+        },
+        audit: [],
+      },
+    }),
   );
   await page.goto('/sites');
   await expect(page.getByRole('textbox')).toHaveCount(1);
@@ -151,5 +190,10 @@ test('keeps site ID search and links to each site across pages', async ({ page }
   await expect(page.getByRole('link', { name: /001026/ })).toBeVisible();
   await page.getByRole('textbox', { name: 'Search site ID' }).fill('001026');
   await expect(page).toHaveURL(/\/sites\?search=001026$/);
-  await expect(page.getByRole('link', { name: /001026/ })).toHaveAttribute('href', '/sites/001026');
+  const site = page.getByRole('link', { name: /001026/ });
+  await expect(site).toHaveAttribute('href', '/sites/001026');
+  await expect(site.getByText('MTNI pending: at least 1d 1h')).toBeVisible();
+  await expect(site.getByText('Contractor pending: None')).toBeVisible();
+  await site.click();
+  await expect(page.getByText('Owner: MTNI · Pending for at least 1d 1h')).toBeVisible();
 });

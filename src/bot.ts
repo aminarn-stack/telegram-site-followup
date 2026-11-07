@@ -5,6 +5,7 @@ import { prisma } from './db.js';
 import { opaqueToken, sha256 } from './lib/security.js';
 import { createCurrentStatusExport } from './services/status-export.js';
 import { createSiteFlowExport } from './services/site-flow-export.js';
+import { createPendingExport } from './services/pending-export.js';
 import { getReminderStats } from './services/reminder.js';
 
 function launchKeyboard(config: Config, startParam?: string) {
@@ -114,7 +115,7 @@ export function createBot(config: Config) {
     const scope = await commandScope(ctx);
     if ('error' in scope) return ctx.reply(scope.error);
     return ctx.reply(
-      '/open opens the app. /summary, /remind, /export, and /flowexport use this group’s assigned SC scope. /flowexport lists every site with its current and next steps. Administrators can run exports in a private chat for the all-SC view.',
+      '/open opens the app. /summary, /remind, /export, /flowexport, and /pending use this group’s assigned SC scope. /flowexport lists every site with its current and next steps. /pending sends the open steps and wait times for MTNI and Contractor. Administrators can run exports in a private chat for the all-SC view.',
     );
   });
   bot.command('summary', async (ctx) => {
@@ -169,6 +170,7 @@ export function createBot(config: Config) {
   });
   const reports = [
     ['export', createCurrentStatusExport, 'Current site status with detailed steps'],
+    ['pending', createPendingExport, 'Pending cases by owner'],
     ['flowexport', createSiteFlowExport, 'Sites by SC and region with current and next steps'],
   ] as const;
   for (const [command, createExport, caption] of reports) {
@@ -181,7 +183,10 @@ export function createBot(config: Config) {
           serviceCenters: scope.serviceCenters ?? [],
         });
         return await ctx.replyWithDocument(new InputFile(report.buffer, report.filename), {
-          caption: `${caption} (${report.siteCount} sites).`,
+          caption:
+            'ownerCounts' in report
+              ? `${caption}\nSites with pending steps\nMTNI: ${report.ownerCounts.MTNI}\nContractor: ${report.ownerCounts.Contractor}`
+              : `${caption} (${report.siteCount} sites).`,
         });
       } catch (error) {
         console.error('Telegram export failed', {

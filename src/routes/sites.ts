@@ -6,6 +6,7 @@ import { Role } from '@prisma/client';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import { prisma } from '../db.js';
+import { pendingAge, stepOwner, summarizePending } from '../domain/pending.js';
 import { actorFrom, authorizeServiceCenter, requireRole } from '../lib/auth.js';
 import { notFound, validation } from '../lib/errors.js';
 import { matchesEvidenceType, safeFilename, sha256 } from '../lib/security.js';
@@ -40,6 +41,7 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
       orderBy: { site: { siteIdText: 'asc' } },
     });
     const statuses = ['NOT_STARTED', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED'] as const;
+    const now = new Date();
     const counts = Object.fromEntries(
       statuses.map((status) => [status, workflows.filter((item) => item.status === status).length]),
     );
@@ -64,6 +66,7 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
             siteIdText: item.site.siteIdText,
             region: item.site.region.code,
             serviceCenter: item.site.serviceCenter.code,
+            pendingByOwner: summarizePending(item.steps, now),
             actionableSteps: item.steps
               .filter((step) => step.state === 'ACTIONABLE')
               .map((step) => step.templateStep.label),
@@ -162,19 +165,28 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
             },
           },
           template: true,
-          steps: { select: { state: true } },
+          steps: {
+            select: {
+              state: true,
+              pendingSince: true,
+              pendingSinceEstimated: true,
+              templateStep: { select: { code: true } },
+            },
+          },
         },
       }),
       prisma.siteWorkflow.count({ where }),
     ]);
+    const now = new Date();
     return {
-      items: items.map((item) => ({
+      items: items.map(({ steps, ...item }) => ({
         ...item,
+        steps: steps.map(({ state }) => ({ state })),
+        pendingByOwner: summarizePending(steps, now),
         progress: {
-          completed: item.steps.filter((step) =>
-            ['COMPLETED', 'NOT_APPLICABLE'].includes(step.state),
-          ).length,
-          total: item.steps.length,
+          completed: steps.filter((step) => ['COMPLETED', 'NOT_APPLICABLE'].includes(step.state))
+            .length,
+          total: steps.length,
         },
       })),
       total,
@@ -223,7 +235,20 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
           orderBy: { createdAt: 'desc' },
         })
       : [];
-    return { ...site, workflow, audit: audits };
+    const now = new Date();
+    return {
+      ...site,
+      workflow: workflow && {
+        ...workflow,
+        pendingByOwner: summarizePending(workflow.steps, now),
+        steps: workflow.steps.map((step) => ({
+          ...step,
+          owner: stepOwner(step.templateStep.code),
+          pendingAge: pendingAge(step, now),
+        })),
+      },
+      audit: audits,
+    };
   });
 
   app.patch('/api/site-steps/:siteStepId', async (request) => {

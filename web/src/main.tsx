@@ -18,6 +18,13 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { api, authenticate, download, type SessionUser } from './api';
+import {
+  STEP_OWNERS,
+  formatPendingAge,
+  type PendingAge,
+  type PendingByOwner,
+  type StepOwner,
+} from '../../src/domain/pending';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -39,6 +46,7 @@ interface SiteListItem {
   };
   template: { code: string };
   progress: { completed: number; total: number };
+  pendingByOwner: PendingByOwner;
 }
 
 function useApiQuery<T>(key: unknown[], path: string) {
@@ -50,6 +58,21 @@ function Status({ value }: { value: string }) {
     <span className={`status status-${value.toLowerCase().replaceAll('_', '-')}`}>
       {value.replaceAll('_', ' ')}
     </span>
+  );
+}
+
+function PendingSummary({ pending }: { pending: PendingByOwner }) {
+  return (
+    <div className="pending-summary">
+      {STEP_OWNERS.map((owner) => {
+        const age = pending[owner];
+        return (
+          <small key={owner}>
+            {owner} pending: {age ? formatPendingAge(age) : 'None'}
+          </small>
+        );
+      })}
+    </div>
   );
 }
 
@@ -111,6 +134,7 @@ function Dashboard({ user }: { user: SessionUser }) {
         region: string;
         serviceCenter: string;
         actionableSteps: string[];
+        pendingByOwner: PendingByOwner;
       }[]
     >;
     scopeBreakdown: {
@@ -255,6 +279,7 @@ function Dashboard({ user }: { user: SessionUser }) {
                         {site.serviceCenter} · {site.region}
                         {site.actionableSteps[0] ? ` · Next: ${site.actionableSteps[0]}` : ''}
                       </small>
+                      <PendingSummary pending={site.pendingByOwner} />
                     </Link>
                   ))}
                 </div>
@@ -338,6 +363,7 @@ function Sites() {
               <small>
                 {item.progress.completed} of {item.progress.total} steps complete
               </small>
+              <PendingSummary pending={item.pendingByOwner} />
             </Link>
           ))}
         </div>
@@ -373,7 +399,12 @@ interface SiteDetailData {
   sectorAddition: string;
   region: { code: string };
   serviceCenter: { code: string };
-  workflow: { status: SiteStatus; template: { code: string; version: number }; steps: StepData[] };
+  workflow: {
+    status: SiteStatus;
+    template: { code: string; version: number };
+    steps: StepData[];
+    pendingByOwner: PendingByOwner;
+  };
   audit: {
     id: string;
     action: string;
@@ -384,6 +415,8 @@ interface SiteDetailData {
 }
 interface StepData {
   id: string;
+  owner: StepOwner;
+  pendingAge: PendingAge | null;
   answer?: string;
   state: string;
   comment?: string;
@@ -410,6 +443,12 @@ function SiteDetail({ user }: { user: SessionUser }) {
   const [answer, setAnswer] = useState('');
   const [comment, setComment] = useState('');
   const [evidence, setEvidence] = useState<File>();
+  const refreshSite = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['site', publicId] }),
+      queryClient.invalidateQueries({ queryKey: ['sites'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+    ]);
   const mutation = useMutation({
     mutationFn: async () => {
       await api(`/api/site-steps/${editing!.id}`, {
@@ -426,7 +465,7 @@ function SiteDetail({ user }: { user: SessionUser }) {
       window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success');
       setEditing(null);
       setEvidence(undefined);
-      await queryClient.invalidateQueries({ queryKey: ['site', publicId] });
+      await refreshSite();
     },
     onError: () => window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('error'),
   });
@@ -436,7 +475,7 @@ function SiteDetail({ user }: { user: SessionUser }) {
         method: 'POST',
         body: JSON.stringify({ reason }),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['site', publicId] }),
+    onSuccess: refreshSite,
   });
   if (isLoading) return <Loading />;
   if (error || !data) return <ErrorView error={error} />;
@@ -455,6 +494,7 @@ function SiteDetail({ user }: { user: SessionUser }) {
         </div>
         <Status value={data.workflow.status} />
       </div>
+      <PendingSummary pending={data.workflow.pendingByOwner} />
       <div className="timeline">
         {data.workflow.steps.map((step, index) => (
           <article
@@ -466,6 +506,10 @@ function SiteDetail({ user }: { user: SessionUser }) {
               <div className="site-row">
                 <div>
                   <strong>{step.templateStep.label}</strong>
+                  <small>
+                    Owner: {step.owner}
+                    {step.pendingAge && ` · Pending for ${formatPendingAge(step.pendingAge)}`}
+                  </small>
                   <small>
                     {step.templateStep.code === 'SITE_IMPLEMENTATION'
                       ? 'Requires all previous steps'

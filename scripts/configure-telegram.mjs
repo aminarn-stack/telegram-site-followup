@@ -46,10 +46,10 @@ await telegram('setMyCommands', {
     { command: 'remind', description: 'Send actionable reminders' },
     { command: 'export', description: 'Export detailed status' },
     { command: 'flowexport', description: 'Export current and next steps' },
+    { command: 'pending', description: 'Report MTNI and Contractor pending cases' },
     { command: 'help', description: 'Show available commands' },
   ],
 });
 
 console.log(`Telegram configured for ${publicUrl.origin}.`);
 import process from 'node:process';
-
