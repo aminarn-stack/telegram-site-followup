@@ -321,7 +321,6 @@ small {
   border-radius: inherit;
   background: #21a179;
 }
-.filters,
 .form-grid {
   display: grid;
   gap: 0.65rem;
@@ -449,6 +448,11 @@ label {
 .modal h2 {
   margin: 0;
 }
+.site-pages {
+  align-items: center;
+  margin-top: 1rem;
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;
@@ -488,9 +492,6 @@ label {
   }
   .metric-grid .metric:first-child {
     grid-column: auto;
-  }
-  .filters {
-    grid-template-columns: 2fr 1fr 1fr;
   }
   .modal-backdrop {
     align-items: center;

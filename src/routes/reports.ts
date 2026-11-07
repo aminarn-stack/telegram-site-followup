@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { Role } from '@prisma/client';
+import { GrammyError, InputFile, type Api } from 'grammy';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { actorFrom, requireRole } from '../lib/auth.js';
+import { AppError, forbidden } from '../lib/errors.js';
 import { createCurrentStatusExport } from '../services/status-export.js';
 import { createSiteFlowExport } from '../services/site-flow-export.js';
 
@@ -18,34 +20,69 @@ function reportScope(role: Role, allowedServiceCenters: string[], requested?: st
       };
 }
 
-export async function reportRoutes(app: FastifyInstance) {
-  app.get('/api/reports/export', async (request, reply) => {
-    const actor = await actorFrom(request);
-    const { serviceCenter } = z
-      .object({ serviceCenter: z.string().min(1).max(50).optional() })
-      .parse(request.query);
-    const report = await createCurrentStatusExport(
-      reportScope(actor.role, actor.serviceCenters, serviceCenter),
-    );
-    return reply
-      .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      .header('content-disposition', `attachment; filename="${report.filename}"`)
-      .send(report.buffer);
-  });
+const exportQuery = z.object({ serviceCenter: z.string().min(1).max(50).optional() });
 
-  app.get('/api/reports/site-flow', async (request, reply) => {
-    const actor = await actorFrom(request);
-    const { serviceCenter } = z
-      .object({ serviceCenter: z.string().min(1).max(50).optional() })
-      .parse(request.query);
-    const report = await createSiteFlowExport(
-      reportScope(actor.role, actor.serviceCenters, serviceCenter),
-    );
-    return reply
-      .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      .header('content-disposition', `attachment; filename="${report.filename}"`)
-      .send(report.buffer);
-  });
+export async function reportRoutes(app: FastifyInstance, telegram?: Api) {
+  const exports = [
+    ['/api/reports/export', createCurrentStatusExport],
+    ['/api/reports/site-flow', createSiteFlowExport],
+  ] as const;
+  for (const [path, createExport] of exports) {
+    app.get(path, async (request, reply) => {
+      const actor = await actorFrom(request);
+      const { serviceCenter } = exportQuery.parse(request.query);
+      const report = await createExport(
+        reportScope(actor.role, actor.serviceCenters, serviceCenter),
+      );
+      return reply
+        .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        .header('content-disposition', `attachment; filename="${report.filename}"`)
+        .send(report.buffer);
+    });
+
+    app.post(path, async (request) => {
+      const actor = await actorFrom(request);
+      if (!request.user.telegramVerified)
+        throw forbidden('Open the Mini App in Telegram to send an export.');
+      if (!telegram)
+        throw new AppError(503, 'BOT_NOT_CONFIGURED', 'Telegram bot is not configured.');
+      const { serviceCenter } = exportQuery.parse(request.query);
+      const user = await prisma.user.findUnique({
+        where: { id: actor.id, active: true },
+        include: { serviceCenters: { include: { serviceCenter: true } } },
+      });
+      if (!user || user.telegramUserId.toString() !== actor.telegramUserId) throw forbidden();
+      const serviceCenters = user.serviceCenters.map((item) => item.serviceCenter.code);
+      const report = await createExport(reportScope(user.role, serviceCenters, serviceCenter));
+      try {
+        await telegram.sendDocument(
+          actor.telegramUserId,
+          new InputFile(report.buffer, report.filename),
+        );
+      } catch (error) {
+        if (
+          error instanceof GrammyError &&
+          (error.error_code === 403 || error.description.includes('chat not found'))
+        ) {
+          throw new AppError(
+            409,
+            'TELEGRAM_CHAT_UNAVAILABLE',
+            'Open the bot’s private chat, press Start or unblock the bot, then try the export again.',
+          );
+        }
+        request.log.warn(
+          { telegramError: error instanceof GrammyError ? error.description : 'Transport error' },
+          'Could not send Telegram export',
+        );
+        throw new AppError(
+          502,
+          'TELEGRAM_EXPORT_FAILED',
+          'Telegram could not receive the export. Please try again.',
+        );
+      }
+      return { ok: true };
+    });
+  }
 
   app.get('/api/reports/weekly', async (request) => {
     const actor = await actorFrom(request);

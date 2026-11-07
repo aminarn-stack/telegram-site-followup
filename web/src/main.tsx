@@ -88,7 +88,13 @@ function Shell({ user, children }: { user: SessionUser; children: React.ReactNod
 }
 
 function Dashboard({ user }: { user: SessionUser }) {
-  const [exportError, setExportError] = useState<string>();
+  const sendToTelegram = Boolean(window.Telegram?.WebApp.initData);
+  const exportReport = useMutation({
+    mutationFn: async ({ path, filename }: { path: string; filename: string }) => {
+      if (sendToTelegram) await api(path, { method: 'POST' });
+      else await download(path, filename);
+    },
+  });
   const { data, isLoading, error } = useApiQuery<{
     total: number;
     counts: Record<string, number>;
@@ -145,20 +151,21 @@ function Dashboard({ user }: { user: SessionUser }) {
         <div className="actions">
           <button
             className="secondary"
+            disabled={exportReport.isPending}
             onClick={() =>
-              download('/api/reports/export', 'site-status.xlsx').catch((error: Error) =>
-                setExportError(error.message),
-              )
+              exportReport.mutate({ path: '/api/reports/export', filename: 'site-status.xlsx' })
             }
           >
             Detailed status export
           </button>
           <button
             className="secondary"
+            disabled={exportReport.isPending}
             onClick={() =>
-              download('/api/reports/site-flow', 'site-current-next-steps.xlsx').catch(
-                (error: Error) => setExportError(error.message),
-              )
+              exportReport.mutate({
+                path: '/api/reports/site-flow',
+                filename: 'site-current-next-steps.xlsx',
+              })
             }
           >
             Current and next steps export
@@ -168,7 +175,15 @@ function Dashboard({ user }: { user: SessionUser }) {
           </Link>
         </div>
       </div>
-      {exportError && <p className="danger">{exportError}</p>}
+      {exportReport.isPending && <p role="status">Preparing the Excel report…</p>}
+      {sendToTelegram && exportReport.isSuccess && (
+        <p role="status">Excel report sent to your private bot chat.</p>
+      )}
+      {exportReport.error && (
+        <p role="alert" className="danger">
+          {exportReport.error.message}
+        </p>
+      )}
       <div className="metric-grid">
         {cards.map(([label, value]) => (
           <article className="metric" key={String(label)}>
@@ -190,22 +205,24 @@ function Dashboard({ user }: { user: SessionUser }) {
                 </span>
                 <button
                   className="link-button"
+                  disabled={exportReport.isPending}
                   onClick={() =>
-                    download(
-                      `/api/reports/export?serviceCenter=${encodeURIComponent(scope.serviceCenter)}`,
-                      `${scope.serviceCenter}-site-status.xlsx`,
-                    ).catch((error: Error) => setExportError(error.message))
+                    exportReport.mutate({
+                      path: `/api/reports/export?serviceCenter=${encodeURIComponent(scope.serviceCenter)}`,
+                      filename: `${scope.serviceCenter}-site-status.xlsx`,
+                    })
                   }
                 >
                   Export this SC
                 </button>
                 <button
                   className="link-button"
+                  disabled={exportReport.isPending}
                   onClick={() =>
-                    download(
-                      `/api/reports/site-flow?serviceCenter=${encodeURIComponent(scope.serviceCenter)}`,
-                      `${scope.serviceCenter}-current-next-steps.xlsx`,
-                    ).catch((error: Error) => setExportError(error.message))
+                    exportReport.mutate({
+                      path: `/api/reports/site-flow?serviceCenter=${encodeURIComponent(scope.serviceCenter)}`,
+                      filename: `${scope.serviceCenter}-current-next-steps.xlsx`,
+                    })
                   }
                 >
                   Export SC steps
@@ -254,16 +271,23 @@ function Dashboard({ user }: { user: SessionUser }) {
 
 function Sites() {
   const [params, setParams] = useSearchParams();
-  const query = params.toString();
-  const { data, isLoading, error } = useApiQuery<{ items: SiteListItem[]; total: number }>(
-    ['sites', query],
-    `/api/sites?${query}`,
-  );
-  const update = (key: string, value: string) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setParams(next);
+  const search = params.get('search') ?? '';
+  const query = new URLSearchParams();
+  for (const key of ['search', 'status', 'page']) {
+    const value = params.get(key);
+    if (value) query.set(key, value);
+  }
+  const queryString = query.toString();
+  const { data, isLoading, error } = useApiQuery<{
+    items: SiteListItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }>(['sites', queryString], `/api/sites?${queryString}`);
+  const pageCount = data ? Math.ceil(data.total / data.pageSize) : 0;
+  const setPage = (page: number) => {
+    query.set('page', String(page));
+    setParams(query);
   };
   return (
     <section>
@@ -273,64 +297,19 @@ function Sites() {
           <p>{data?.total ?? 0} matching sites</p>
         </div>
       </div>
-      <div className="filters">
+      <div className="compact">
         <input
           aria-label="Search site ID"
           placeholder="Search Site ID"
-          value={params.get('search') ?? ''}
-          onChange={(event) => update('search', event.target.value)}
-        />
-        <select
-          aria-label="Status filter"
-          value={params.get('status') ?? ''}
-          onChange={(event) => update('status', event.target.value)}
-        >
-          <option value="">All statuses</option>
-          {['NOT_STARTED', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED'].map((item) => (
-            <option key={item}>{item}</option>
-          ))}
-        </select>
-        <input
-          aria-label="Region filter"
-          placeholder="Region"
-          value={params.get('region') ?? ''}
-          onChange={(event) => update('region', event.target.value)}
-        />
-        <input
-          aria-label="SC filter"
-          placeholder="Service center"
-          value={params.get('serviceCenter') ?? ''}
-          onChange={(event) => update('serviceCenter', event.target.value)}
-        />
-        <input
-          aria-label="Import week filter"
-          type="date"
-          value={params.get('week') ?? ''}
-          onChange={(event) => update('week', event.target.value)}
-        />
-        <select
-          aria-label="Site type filter"
-          value={params.get('siteType') ?? ''}
-          onChange={(event) => update('siteType', event.target.value)}
-        >
-          <option value="">All site types</option>
-          <option value="NORMAL">Normal</option>
-          <option value="SHARED">Shared</option>
-        </select>
-        <select
-          aria-label="Sector addition filter"
-          value={params.get('sectorAddition') ?? ''}
-          onChange={(event) => update('sectorAddition', event.target.value)}
-        >
-          <option value="">All sector settings</option>
-          <option value="YES">Included</option>
-          <option value="NO">Not included</option>
-        </select>
-        <input
-          aria-label="Assigned user filter"
-          placeholder="Assigned user UUID"
-          value={params.get('assignedUser') ?? ''}
-          onChange={(event) => update('assignedUser', event.target.value)}
+          maxLength={100}
+          value={search}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value) query.set('search', value);
+            else query.delete('search');
+            query.delete('page');
+            setParams(query, { replace: true });
+          }}
         />
       </div>
       {isLoading ? (
@@ -361,6 +340,27 @@ function Sites() {
               </small>
             </Link>
           ))}
+        </div>
+      )}
+      {data && pageCount > 1 && (
+        <div className="actions site-pages" aria-label="Site pages">
+          <button
+            className="secondary"
+            disabled={data.page <= 1}
+            onClick={() => setPage(data.page - 1)}
+          >
+            Previous
+          </button>
+          <span>
+            Page {data.page} of {pageCount}
+          </span>
+          <button
+            className="secondary"
+            disabled={data.page >= pageCount}
+            onClick={() => setPage(data.page + 1)}
+          >
+            Next
+          </button>
         </div>
       )}
     </section>

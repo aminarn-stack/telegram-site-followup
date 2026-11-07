@@ -6,6 +6,7 @@ declare module '@fastify/jwt' {
     payload: {
       sub: string;
       telegramUserId: string;
+      telegramVerified?: boolean;
       role: Role;
       regions: string[];
       serviceCenters: string[];
@@ -13,6 +14,7 @@ declare module '@fastify/jwt' {
     user: {
       sub: string;
       telegramUserId: string;
+      telegramVerified?: boolean;
       role: Role;
       regions: string[];
       serviceCenters: string[];
