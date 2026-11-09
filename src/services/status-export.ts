@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import type { Role } from '@prisma/client';
 import { prisma } from '../db.js';
 import { stepOwner } from '../domain/pending.js';
+import { activeBpMilestoneOrder } from '../domain/workflow.js';
 import {
   pendingSiteColumns,
   pendingSiteHeaders,
@@ -70,8 +71,9 @@ export async function createCurrentStatusExport(actor: ExportActor) {
     };
   });
 
-  const detailRows = workflows.flatMap((workflow) =>
-    workflow.steps.map((step) => ({
+  const detailRows = workflows.flatMap((workflow) => {
+    const milestoneOrder = activeBpMilestoneOrder(workflow.steps);
+    return workflow.steps.map((step) => ({
       'Site ID': workflow.site.siteIdText,
       Region: workflow.site.region.code,
       SC: workflow.site.serviceCenter.code,
@@ -86,9 +88,13 @@ export async function createCurrentStatusExport(actor: ExportActor) {
         : '',
       'Updated At': step.answer ? step.updatedAt.toISOString() : '',
       Owner: stepOwner(step.templateStep.code),
+      'BP Milestone Coverage':
+        milestoneOrder !== undefined && step.templateStep.displayOrder < milestoneOrder
+          ? 'Covered by BP milestone'
+          : '',
       ...pendingStepColumns(step, now),
-    })),
-  );
+    }));
+  });
 
   const scopeRows = Object.values(
     workflows.reduce<
@@ -163,15 +169,16 @@ export async function createCurrentStatusExport(actor: ExportActor) {
       'Updated By',
       'Updated At',
       'Owner',
+      'BP Milestone Coverage',
       ...pendingStepHeaders,
     ],
   });
   setColumnWidths(summary, [18, 14, 16, 14, 16, 16, 12, 34, 34, 14, 24, 24, 21, 18, 25, 23]);
-  setColumnWidths(details, [18, 14, 16, 16, 12, 34, 18, 22, 45, 24, 24, 16, 28, 16, 16]);
+  setColumnWidths(details, [18, 14, 16, 16, 12, 34, 18, 22, 45, 24, 24, 16, 26, 28, 16, 16]);
   setColumnWidths(scopes, [20, 30, 12, 14, 14, 12, 12]);
   scopes['!autofilter'] = { ref: scopes['!ref'] ?? 'A1:G1' };
   summary['!autofilter'] = { ref: summary['!ref'] ?? 'A1:P1' };
-  details['!autofilter'] = { ref: details['!ref'] ?? 'A1:O1' };
+  details['!autofilter'] = { ref: details['!ref'] ?? 'A1:P1' };
   XLSX.utils.book_append_sheet(workbook, scopes, 'Service Centers');
   XLSX.utils.book_append_sheet(workbook, summary, 'Current Status');
   XLSX.utils.book_append_sheet(workbook, details, 'Step Details');

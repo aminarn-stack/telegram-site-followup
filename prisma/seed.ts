@@ -23,6 +23,7 @@ async function backfillActiveWorkflows(
   });
   for (const workflow of activeWorkflows) {
     const current = workflow.steps.find((step) => step.templateStepId === templateStep.id);
+    if (current?.state === 'COMPLETED' && !current.answer) continue;
     const allPreviousComplete = workflow.steps
       .filter(
         (step) =>

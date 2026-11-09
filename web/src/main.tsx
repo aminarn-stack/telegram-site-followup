@@ -25,6 +25,7 @@ import {
   type PendingByOwner,
   type StepOwner,
 } from '../../src/domain/pending';
+import { BP_MILESTONE_ANSWER, BP_STEP_CODE } from '../../src/domain/workflow';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -417,6 +418,7 @@ interface StepData {
   id: string;
   owner: StepOwner;
   pendingAge: PendingAge | null;
+  coveredByBpMilestone: boolean;
   answer?: string;
   state: string;
   comment?: string;
@@ -479,6 +481,12 @@ function SiteDetail({ user }: { user: SessionUser }) {
   });
   if (isLoading) return <Loading />;
   if (error || !data) return <ErrorView error={error} />;
+  const activeMilestoneId = data.workflow.steps.find(
+    (step) =>
+      step.templateStep.code === BP_STEP_CODE &&
+      step.answer === BP_MILESTONE_ANSWER &&
+      step.state === 'COMPLETED',
+  )?.id;
   return (
     <section>
       <Link className="back" to="/sites">
@@ -520,9 +528,10 @@ function SiteDetail({ user }: { user: SessionUser }) {
                 </div>
                 <Status value={step.state} />
               </div>
+              {step.coveredByBpMilestone && <p>Covered by BP milestone</p>}
               {step.answer && (
                 <p>
-                  <b>Answer:</b> {step.answer}
+                  <b>{step.coveredByBpMilestone ? 'Recorded answer:' : 'Answer:'}</b> {step.answer}
                 </p>
               )}
               {step.comment && (
@@ -541,21 +550,27 @@ function SiteDetail({ user }: { user: SessionUser }) {
                 </a>
               ))}
               {['ADMIN', 'CONTRIBUTOR'].includes(user.role) &&
-                step.state !== 'LOCKED' &&
+                !step.coveredByBpMilestone &&
+                step.id !== activeMilestoneId &&
+                (step.state !== 'LOCKED' ||
+                  (step.templateStep.code === BP_STEP_CODE &&
+                    step.templateStep.allowedAnswers.includes(BP_MILESTONE_ANSWER))) &&
                 step.state !== 'NEEDS_REVIEW' && (
                   <button
                     className="secondary"
                     onClick={() => {
                       setEditing(step);
-                      setAnswer(step.answer ?? '');
+                      setAnswer(
+                        step.state === 'LOCKED' ? BP_MILESTONE_ANSWER : (step.answer ?? ''),
+                      );
                       setComment(step.comment ?? '');
                       setEvidence(undefined);
                     }}
                   >
-                    Update step
+                    {step.state === 'LOCKED' ? 'Set BP milestone' : 'Update step'}
                   </button>
                 )}
-              {user.role === 'ADMIN' && step.answer && (
+              {user.role === 'ADMIN' && step.answer && !step.coveredByBpMilestone && (
                 <button
                   className="secondary"
                   onClick={() => {
@@ -563,13 +578,18 @@ function SiteDetail({ user }: { user: SessionUser }) {
                     if (reason?.trim()) reopen.mutate({ stepId: step.id, reason });
                   }}
                 >
-                  Reopen branch
+                  {step.id === activeMilestoneId ? 'Reopen BP milestone' : 'Reopen branch'}
                 </button>
               )}
             </div>
           </article>
         ))}
       </div>
+      {reopen.error && (
+        <p role="alert" className="danger">
+          {reopen.error.message}
+        </p>
+      )}
       <h2>History</h2>
       <div className="history">
         {data.audit.map((item) => (
@@ -591,7 +611,9 @@ function SiteDetail({ user }: { user: SessionUser }) {
               event.preventDefault();
               if (
                 confirm(
-                  `Save ${answer} for ${editing.templateStep.label} on Site ${data.siteIdText}?`,
+                  answer === BP_MILESTONE_ANSWER
+                    ? `Mark BP issued and treat all earlier steps on Site ${data.siteIdText} as done?`
+                    : `Save ${answer} for ${editing.templateStep.label} on Site ${data.siteIdText}?`,
                 )
               )
                 mutation.mutate();
@@ -602,7 +624,10 @@ function SiteDetail({ user }: { user: SessionUser }) {
               Answer
               <select required value={answer} onChange={(event) => setAnswer(event.target.value)}>
                 <option value="">Select an answer</option>
-                {editing.templateStep.allowedAnswers.map((value) => (
+                {(editing.state === 'LOCKED'
+                  ? [BP_MILESTONE_ANSWER]
+                  : editing.templateStep.allowedAnswers
+                ).map((value) => (
                   <option key={value}>{value}</option>
                 ))}
               </select>
