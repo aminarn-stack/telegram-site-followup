@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import { prisma } from '../db.js';
 import { pendingAge, stepOwner, summarizePending } from '../domain/pending.js';
-import { activeBpMilestoneOrder } from '../domain/workflow.js';
+import { activeBpMilestoneOrder, isCoveredByBpMilestone } from '../domain/workflow.js';
 import { actorFrom, authorizeServiceCenter, requireRole } from '../lib/auth.js';
 import { notFound, validation } from '../lib/errors.js';
 import { matchesEvidenceType, safeFilename, sha256 } from '../lib/security.js';
@@ -245,8 +245,11 @@ export async function siteRoutes(app: FastifyInstance, config: Config) {
         pendingByOwner: summarizePending(workflow.steps, now),
         steps: workflow.steps.map((step) => ({
           ...step,
-          coveredByBpMilestone:
-            milestoneOrder !== undefined && step.templateStep.displayOrder < milestoneOrder,
+          coveredByBpMilestone: isCoveredByBpMilestone(
+            milestoneOrder,
+            step.templateStep.displayOrder,
+            step.bpMilestoneOverride,
+          ),
           owner: stepOwner(step.templateStep.code),
           pendingAge: pendingAge(step, now),
         })),

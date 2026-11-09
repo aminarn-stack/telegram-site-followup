@@ -25,7 +25,7 @@ import {
   type PendingByOwner,
   type StepOwner,
 } from '../../src/domain/pending';
-import { BP_MILESTONE_ANSWER, BP_STEP_CODE } from '../../src/domain/workflow';
+import { BP_MILESTONE_ANSWER, BP_STEP_CODE, PORT_CHECK_STEP_CODE } from '../../src/domain/workflow';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -550,7 +550,7 @@ function SiteDetail({ user }: { user: SessionUser }) {
                 </a>
               ))}
               {['ADMIN', 'CONTRIBUTOR'].includes(user.role) &&
-                !step.coveredByBpMilestone &&
+                (!step.coveredByBpMilestone || step.templateStep.code === PORT_CHECK_STEP_CODE) &&
                 step.id !== activeMilestoneId &&
                 (step.state !== 'LOCKED' ||
                   (step.templateStep.code === BP_STEP_CODE &&
@@ -570,17 +570,20 @@ function SiteDetail({ user }: { user: SessionUser }) {
                     {step.state === 'LOCKED' ? 'Set BP milestone' : 'Update step'}
                   </button>
                 )}
-              {user.role === 'ADMIN' && step.answer && !step.coveredByBpMilestone && (
-                <button
-                  className="secondary"
-                  onClick={() => {
-                    const reason = window.prompt('Reason for reopening this branch');
-                    if (reason?.trim()) reopen.mutate({ stepId: step.id, reason });
-                  }}
-                >
-                  {step.id === activeMilestoneId ? 'Reopen BP milestone' : 'Reopen branch'}
-                </button>
-              )}
+              {user.role === 'ADMIN' &&
+                (step.coveredByBpMilestone
+                  ? step.templateStep.code === PORT_CHECK_STEP_CODE
+                  : step.answer) && (
+                  <button
+                    className="secondary"
+                    onClick={() => {
+                      const reason = window.prompt('Reason for reopening this branch');
+                      if (reason?.trim()) reopen.mutate({ stepId: step.id, reason });
+                    }}
+                  >
+                    {step.id === activeMilestoneId ? 'Reopen BP milestone' : 'Reopen branch'}
+                  </button>
+                )}
             </div>
           </article>
         ))}
