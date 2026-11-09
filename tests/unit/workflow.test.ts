@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BP_MILESTONE_ANSWER,
+  BP_STEP_CODE,
   initialStepStates,
   recalculate,
   templateFor,
@@ -8,13 +10,41 @@ import {
   type TemplateDefinition,
 } from '../../src/domain/workflow.js';
 
-function answer(template: TemplateDefinition, steps: StepSnapshot[], code: string, value: string) {
+function answer(
+  template: TemplateDefinition,
+  steps: StepSnapshot[],
+  code: string,
+  value: string | null,
+) {
   const target = steps.find((item) => item.code === code)!;
   target.answer = value;
   return recalculate(template, steps).steps;
 }
 
 describe('seeded workflow templates', () => {
+  it.each(WORKFLOW_TEMPLATES)('applies the BP milestone in $code', (template) => {
+    const bp = template.steps.find((step) => step.code === BP_STEP_CODE)!;
+    expect(bp.answers).toContain(BP_MILESTONE_ANSWER);
+    const initial = answer(template, initialStepStates(template), 'AVAILABLE_PORT', 'NOK');
+    expect(initial.find((step) => step.code === BP_STEP_CODE)?.state).toBe('LOCKED');
+    const after = answer(template, initial, BP_STEP_CODE, BP_MILESTONE_ANSWER);
+
+    for (const step of template.steps.filter((item) => item.order <= bp.order)) {
+      expect(after.find((item) => item.code === step.code)?.state).toBe('COMPLETED');
+    }
+    expect(after.find((step) => step.code === 'AVAILABLE_PORT')?.answer).toBe('NOK');
+    expect(after.find((step) => step.code === 'BP_REQUEST')?.answer).toBeNull();
+    expect(after.find((step) => step.code === 'LICENSE_REQUIRED')?.state).toBe('ACTIONABLE');
+    expect(after.find((step) => step.code === 'LICENSE_ISSUANCE')?.state).toBe('LOCKED');
+    expect(after.find((step) => step.code === 'SITE_IMPLEMENTATION')?.state).toBe('LOCKED');
+    expect(recalculate(template, after)).toEqual({ steps: after, siteStatus: 'IN_PROGRESS' });
+
+    const reopened = answer(template, after, BP_STEP_CODE, null);
+    expect(reopened.find((step) => step.code === 'AVAILABLE_PORT')?.state).toBe('BLOCKED');
+    expect(reopened.find((step) => step.code === BP_STEP_CODE)?.state).toBe('LOCKED');
+    expect(reopened.find((step) => step.code === 'LICENSE_REQUIRED')?.state).toBe('LOCKED');
+  });
+
   it('routes all four scenarios to the exact documented step counts', () => {
     expect(templateFor('NORMAL', 'NO').steps).toHaveLength(18);
     expect(templateFor('SHARED', 'NO').steps).toHaveLength(19);

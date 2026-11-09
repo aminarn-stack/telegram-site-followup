@@ -197,3 +197,65 @@ test('keeps site ID search and links to each site across pages', async ({ page }
   await site.click();
   await expect(page.getByText('Owner: MTNI · Pending for at least 1d 1h')).toBeVisible();
 });
+
+test('offers only the BP milestone answer while BP issuance is locked', async ({ page }) => {
+  const milestone = 'Done - All previous steps considered as Done';
+  let saved = false;
+  await page.route('**/api/sites/001001', (route) =>
+    route.fulfill({
+      json: {
+        siteIdText: '001001',
+        siteType: 'NORMAL',
+        sectorAddition: 'NO',
+        serviceCenter: { code: 'SC-A' },
+        region: { code: 'North' },
+        workflow: {
+          status: saved ? 'IN_PROGRESS' : 'NOT_STARTED',
+          pendingByOwner,
+          steps: [
+            {
+              id: 'prior-step',
+              state: saved ? 'COMPLETED' : 'ACTIONABLE',
+              owner: 'Contractor',
+              answer: 'NOK',
+              coveredByBpMilestone: saved,
+              templateStep: { code: 'AVAILABLE_PORT', label: 'Available port check' },
+              evidence: [],
+            },
+            {
+              id: 'bp-step',
+              version: 0,
+              state: saved ? 'COMPLETED' : 'LOCKED',
+              owner: 'MTNI',
+              answer: saved ? milestone : null,
+              templateStep: {
+                code: 'BP_ISSUANCE',
+                label: 'BP issuance by RMPS',
+                prerequisiteCode: 'BP_REQUEST',
+                allowedAnswers: ['Done', 'Not Done', milestone],
+              },
+              evidence: [],
+            },
+          ],
+        },
+        audit: [],
+      },
+    }),
+  );
+  await page.route('**/api/site-steps/bp-step', (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({ answer: milestone, version: 0 });
+    saved = true;
+    return route.fulfill({ json: { siteStatus: 'IN_PROGRESS' } });
+  });
+  await page.goto('/sites/001001');
+  await page.getByRole('button', { name: 'Set BP milestone' }).click();
+  await expect(page.getByRole('option').allTextContents()).resolves.toEqual([
+    'Select an answer',
+    milestone,
+  ]);
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Confirm and save' }).click();
+  await expect(page.getByText('Covered by BP milestone')).toBeVisible();
+  await expect(page.getByText('Recorded answer: NOK')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reopen BP milestone' })).toBeVisible();
+});

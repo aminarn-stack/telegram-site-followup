@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { Role } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
+import { BP_MILESTONE_ANSWER, BP_STEP_CODE } from '../domain/workflow.js';
 import { actorFrom, requireRole } from '../lib/auth.js';
 import { notFound, validation } from '../lib/errors.js';
 import { archiveWeeklyPlan } from '../services/weekly-plan.js';
@@ -262,7 +263,10 @@ export async function adminRoutes(app: FastifyInstance) {
               label: item.label,
               prerequisiteCode: item.prerequisiteCode,
               stepType: item.stepType,
-              allowedAnswers: item.allowedAnswers,
+              allowedAnswers:
+                item.code === BP_STEP_CODE
+                  ? [...new Set([...item.allowedAnswers, BP_MILESTONE_ANSWER])]
+                  : item.allowedAnswers,
             })),
           },
         },

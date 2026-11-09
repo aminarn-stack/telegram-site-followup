@@ -240,6 +240,13 @@ the oldest pending step for each owner. Step Details shows the time for each ind
 A lower bound means an existing step was already pending at its last saved timestamp before the
 upgrade.
 
+### BP issuance milestone
+
+In any flow, open **BP issuance by RMPS** and select **Done - All previous steps considered as Done**.
+If the step is locked, use **Set BP milestone**. This closes the applicable earlier steps and
+unlocks the next steps that depend on BP. Earlier recorded answers, comments, and evidence stay
+available. An administrator can use **Reopen BP milestone** to restore the prerequisite checks.
+
 ### Workflow licensing branch
 
 - Every flow includes **License required** immediately after **BP issuance by RMPS**.

@@ -41,6 +41,24 @@ const deliveryAnswers = ['Delivered', 'Not Delivered'] as const;
 const licenseRequiredAnswers = ['Yes', 'Requested - No'] as const;
 const implementationAnswers = ['Done', 'Ongoing', 'Not Possible'] as const;
 
+export const BP_STEP_CODE = 'BP_ISSUANCE';
+export const BP_MILESTONE_ANSWER = 'Done - All previous steps considered as Done';
+
+export function activeBpMilestoneOrder(
+  steps: readonly {
+    answer: string | null;
+    state: string;
+    templateStep: { code: string; displayOrder: number };
+  }[],
+): number | undefined {
+  return steps.find(
+    (step) =>
+      step.templateStep.code === BP_STEP_CODE &&
+      step.answer === BP_MILESTONE_ANSWER &&
+      step.state === 'COMPLETED',
+  )?.templateStep.displayOrder;
+}
+
 const step = (
   code: string,
   order: number,
@@ -65,7 +83,10 @@ const base = [
     receivedAnswers,
   ),
   step('BP_REQUEST', 7, 'BP request', 'INSTALLATION_PLAN', 'STANDARD', doneAnswers),
-  step('BP_ISSUANCE', 8, 'BP issuance by RMPS', 'BP_REQUEST', 'STANDARD', doneAnswers),
+  step(BP_STEP_CODE, 8, 'BP issuance by RMPS', 'BP_REQUEST', 'STANDARD', [
+    ...doneAnswers,
+    BP_MILESTONE_ANSWER,
+  ]),
   step(
     'LICENSE_REQUIRED',
     9,
@@ -312,6 +333,11 @@ export function recalculate(
   snapshots: readonly StepSnapshot[],
 ): { steps: StepSnapshot[]; siteStatus: SiteStatus } {
   const byCode = new Map(snapshots.map((item) => [item.code, { ...item }]));
+  const bp = byCode.get(BP_STEP_CODE);
+  const milestoneOrder =
+    bp?.answer === BP_MILESTONE_ANSWER && bp.state !== 'NEEDS_REVIEW'
+      ? template.steps.find((item) => item.code === BP_STEP_CODE)?.order
+      : undefined;
   const initial = byCode.get('INITIAL_ACCESS');
   const permission = byCode.get('PERMISSION');
   if (
@@ -336,6 +362,11 @@ export function recalculate(
   for (const definition of template.steps) {
     const current = byCode.get(definition.code);
     if (!current) throw new Error(`Missing site step ${definition.code}`);
+    if (milestoneOrder !== undefined && definition.order <= milestoneOrder) {
+      if (definition.code === BP_STEP_CODE || current.state !== 'NOT_APPLICABLE')
+        current.state = 'COMPLETED';
+      continue;
+    }
     if (current.state === 'NEEDS_REVIEW') continue;
     if (
       ['PERMISSION', 'LICENSE_ISSUANCE'].includes(definition.code) &&
