@@ -41,7 +41,7 @@ async function lockAndLoadStep(tx: Prisma.TransactionClient, siteStepId: string)
         include: {
           site: { include: { region: true, serviceCenter: true } },
           template: { include: { steps: { orderBy: { displayOrder: 'asc' } } } },
-          steps: { include: { templateStep: true } },
+          steps: { include: { templateStep: true, escalation: true } },
         },
       },
     },
@@ -100,13 +100,24 @@ async function persistStepStates(
         },
       });
     }
+    const existingEscalation = persisted.escalation;
     if (item.state === 'BLOCKED') {
       const source = item.code === target.templateStep.code ? options.comment : persisted.comment;
+      const reason = source || `Blocked by ${item.code}`;
+      if (
+        existingEscalation &&
+        !existingEscalation.resolvedAt &&
+        persisted.state === 'BLOCKED' &&
+        persisted.answer === item.answer &&
+        existingEscalation.reason === reason
+      ) {
+        continue;
+      }
       const escalation = await tx.escalation.upsert({
         where: { siteStepId: persisted.id },
-        create: { siteStepId: persisted.id, reason: source || `Blocked by ${item.code}` },
+        create: { siteStepId: persisted.id, reason },
         update: {
-          reason: source || `Blocked by ${item.code}`,
+          reason,
           resolvedAt: null,
           notificationState: 'PENDING',
         },
@@ -122,30 +133,27 @@ async function persistStepStates(
         eventTime: options.eventTime,
         deepLinkTarget: { kind: 'site', publicId: target.workflow.site.publicId },
       });
-    } else {
-      const open = await tx.escalation.findUnique({ where: { siteStepId: persisted.id } });
-      if (open && !open.resolvedAt) {
-        await tx.escalation.update({
-          where: { id: open.id },
-          data: { resolvedAt: new Date(), notificationState: 'PENDING' },
-        });
-        await queueGroupNotifications(tx, 'RESOLUTION', open.id, {
-          siteId: target.workflow.site.siteIdText,
-          region: target.workflow.site.region.code,
-          serviceCenter: target.workflow.site.serviceCenter.code,
-          step: persisted.templateStep.label,
-          answer: isCoveredByBpMilestone(
-            options.milestoneOrder,
-            persisted.templateStep.displayOrder,
-            item.bpMilestoneOverride,
-          )
-            ? 'Covered by BP milestone'
-            : item.answer,
-          updater: options.updater,
-          eventTime: options.eventTime,
-          deepLinkTarget: { kind: 'site', publicId: target.workflow.site.publicId },
-        });
-      }
+    } else if (existingEscalation && !existingEscalation.resolvedAt) {
+      await tx.escalation.update({
+        where: { id: existingEscalation.id },
+        data: { resolvedAt: new Date(), notificationState: 'PENDING' },
+      });
+      await queueGroupNotifications(tx, 'RESOLUTION', existingEscalation.id, {
+        siteId: target.workflow.site.siteIdText,
+        region: target.workflow.site.region.code,
+        serviceCenter: target.workflow.site.serviceCenter.code,
+        step: persisted.templateStep.label,
+        answer: isCoveredByBpMilestone(
+          options.milestoneOrder,
+          persisted.templateStep.displayOrder,
+          item.bpMilestoneOverride,
+        )
+          ? 'Covered by BP milestone'
+          : item.answer,
+        updater: options.updater,
+        eventTime: options.eventTime,
+        deepLinkTarget: { kind: 'site', publicId: target.workflow.site.publicId },
+      });
     }
   }
   await tx.siteWorkflow.update({
