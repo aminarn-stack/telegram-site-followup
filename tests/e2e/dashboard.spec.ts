@@ -201,6 +201,9 @@ test('keeps site ID search and links to each site across pages', async ({ page }
 test('offers only the BP milestone answer while BP issuance is locked', async ({ page }) => {
   const milestone = 'Done - All previous steps considered as Done';
   let saved = false;
+  let portAnswer: string | null = 'NOK';
+  let portCovered = true;
+  let portVersion = 0;
   await page.route('**/api/sites/001001', (route) =>
     route.fulfill({
       json: {
@@ -215,11 +218,16 @@ test('offers only the BP milestone answer while BP issuance is locked', async ({
           steps: [
             {
               id: 'prior-step',
-              state: saved ? 'COMPLETED' : 'ACTIONABLE',
+              version: portVersion,
+              state: saved && (portCovered || portAnswer === 'OK') ? 'COMPLETED' : 'ACTIONABLE',
               owner: 'Contractor',
-              answer: 'NOK',
-              coveredByBpMilestone: saved,
-              templateStep: { code: 'AVAILABLE_PORT', label: 'Available port check' },
+              answer: portAnswer,
+              coveredByBpMilestone: saved && portCovered,
+              templateStep: {
+                code: 'AVAILABLE_PORT',
+                label: 'Available port check',
+                allowedAnswers: ['OK', 'NOK'],
+              },
               evidence: [],
             },
             {
@@ -247,6 +255,19 @@ test('offers only the BP milestone answer while BP issuance is locked', async ({
     saved = true;
     return route.fulfill({ json: { siteStatus: 'IN_PROGRESS' } });
   });
+  await page.route('**/api/site-steps/prior-step', (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({ answer: 'OK', version: 1 });
+    portAnswer = 'OK';
+    portVersion += 1;
+    return route.fulfill({ json: {} });
+  });
+  await page.route('**/api/site-steps/prior-step/reopen', (route) => {
+    expect(route.request().postDataJSON()).toEqual({ reason: 'New port check required' });
+    portAnswer = null;
+    portCovered = false;
+    portVersion += 1;
+    return route.fulfill({ json: {} });
+  });
   await page.goto('/sites/001001');
   await page.getByRole('button', { name: 'Set BP milestone' }).click();
   await expect(page.getByRole('option').allTextContents()).resolves.toEqual([
@@ -257,5 +278,16 @@ test('offers only the BP milestone answer while BP issuance is locked', async ({
   await page.getByRole('button', { name: 'Confirm and save' }).click();
   await expect(page.getByText('Covered by BP milestone')).toBeVisible();
   await expect(page.getByText('Recorded answer: NOK')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reopen BP milestone' })).toBeVisible();
+  const port = page.locator('article').filter({ hasText: 'Available port check' });
+  await expect(port.getByRole('button', { name: 'Update step' })).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept('New port check required'));
+  await port.getByRole('button', { name: 'Reopen branch' }).click();
+  await expect(port.getByText('Covered by BP milestone')).toHaveCount(0);
+  await port.getByRole('button', { name: 'Update step' }).click();
+  await page.getByLabel('Answer').selectOption('OK');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Confirm and save' }).click();
+  await expect(port.getByText('Answer: OK')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reopen BP milestone' })).toBeVisible();
 });

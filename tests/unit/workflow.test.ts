@@ -45,6 +45,42 @@ describe('seeded workflow templates', () => {
     expect(reopened.find((step) => step.code === 'LICENSE_REQUIRED')?.state).toBe('LOCKED');
   });
 
+  it.each(WORKFLOW_TEMPLATES)(
+    'tracks an explicit port check independently in $code',
+    (template) => {
+      const steps = answer(
+        template,
+        initialStepStates(template),
+        BP_STEP_CODE,
+        BP_MILESTONE_ANSWER,
+      );
+      const port = steps.find((step) => step.code === 'AVAILABLE_PORT')!;
+      port.bpMilestoneOverride = true;
+
+      for (const [portAnswer, portState, siteStatus] of [
+        [null, 'ACTIONABLE', 'IN_PROGRESS'],
+        ['NOK', 'BLOCKED', 'BLOCKED'],
+        ['OK', 'COMPLETED', 'IN_PROGRESS'],
+      ] as const) {
+        port.answer = portAnswer;
+        const calculated = recalculate(template, steps);
+        expect(calculated.siteStatus).toBe(siteStatus);
+        expect(calculated.steps.find((step) => step.code === 'AVAILABLE_PORT')?.state).toBe(
+          portState,
+        );
+        expect(calculated.steps.find((step) => step.code === 'BP_REQUEST')?.state).toBe(
+          'COMPLETED',
+        );
+        expect(calculated.steps.find((step) => step.code === BP_STEP_CODE)?.state).toBe(
+          'COMPLETED',
+        );
+        expect(calculated.steps.find((step) => step.code === 'LICENSE_REQUIRED')?.state).toBe(
+          'ACTIONABLE',
+        );
+      }
+    },
+  );
+
   it('routes all four scenarios to the exact documented step counts', () => {
     expect(templateFor('NORMAL', 'NO').steps).toHaveLength(18);
     expect(templateFor('SHARED', 'NO').steps).toHaveLength(19);

@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import type { Role } from '@prisma/client';
 import { prisma } from '../db.js';
 import { stepOwner } from '../domain/pending.js';
-import { activeBpMilestoneOrder } from '../domain/workflow.js';
+import { activeBpMilestoneOrder, isCoveredByBpMilestone } from '../domain/workflow.js';
 import {
   pendingSiteColumns,
   pendingSiteHeaders,
@@ -88,10 +88,13 @@ export async function createCurrentStatusExport(actor: ExportActor) {
         : '',
       'Updated At': step.answer ? step.updatedAt.toISOString() : '',
       Owner: stepOwner(step.templateStep.code),
-      'BP Milestone Coverage':
-        milestoneOrder !== undefined && step.templateStep.displayOrder < milestoneOrder
-          ? 'Covered by BP milestone'
-          : '',
+      'BP Milestone Coverage': isCoveredByBpMilestone(
+        milestoneOrder,
+        step.templateStep.displayOrder,
+        step.bpMilestoneOverride,
+      )
+        ? 'Covered by BP milestone'
+        : '',
       ...pendingStepColumns(step, now),
     }));
   });

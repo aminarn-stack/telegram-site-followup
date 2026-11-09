@@ -7,6 +7,8 @@ import {
   BP_MILESTONE_ANSWER,
   BP_STEP_CODE,
   descendantsOf,
+  isCoveredByBpMilestone,
+  PORT_CHECK_STEP_CODE,
   recalculate,
   type StepSnapshot,
   type TemplateDefinition,
@@ -87,11 +89,13 @@ async function persistStepStates(
     const persisted = target.workflow.steps.find(
       (candidate) => candidate.templateStep.code === item.code,
     )!;
-    if (persisted.state !== item.state) {
+    const bpMilestoneOverride = item.bpMilestoneOverride ?? false;
+    if (persisted.state !== item.state || persisted.bpMilestoneOverride !== bpMilestoneOverride) {
       await tx.siteStep.update({
         where: { id: persisted.id },
         data: {
           state: item.state,
+          bpMilestoneOverride,
           ...(persisted.id !== target.id ? { version: { increment: 1 } } : {}),
         },
       });
@@ -130,11 +134,13 @@ async function persistStepStates(
           region: target.workflow.site.region.code,
           serviceCenter: target.workflow.site.serviceCenter.code,
           step: persisted.templateStep.label,
-          answer:
-            options.milestoneOrder !== undefined &&
-            persisted.templateStep.displayOrder < options.milestoneOrder
-              ? 'Covered by BP milestone'
-              : item.answer,
+          answer: isCoveredByBpMilestone(
+            options.milestoneOrder,
+            persisted.templateStep.displayOrder,
+            item.bpMilestoneOverride,
+          )
+            ? 'Covered by BP milestone'
+            : item.answer,
           updater: options.updater,
           eventTime: options.eventTime,
           deepLinkTarget: { kind: 'site', publicId: target.workflow.site.publicId },
@@ -160,9 +166,14 @@ export async function updateSiteStep(input: StepUpdateInput) {
       });
     }
     const isBp = target.templateStep.code === BP_STEP_CODE;
+    const isPortCheck = target.templateStep.code === PORT_CHECK_STEP_CODE;
     const appliesMilestone = isBp && input.answer === BP_MILESTONE_ANSWER;
     const milestoneOrder = activeBpMilestoneOrder(target.workflow.steps);
-    if (milestoneOrder !== undefined && target.templateStep.displayOrder <= milestoneOrder) {
+    if (
+      milestoneOrder !== undefined &&
+      (isBp ||
+        (!isPortCheck && isCoveredByBpMilestone(milestoneOrder, target.templateStep.displayOrder)))
+    ) {
       throw conflict('An administrator must reopen the BP milestone before changing this step.');
     }
     if ((target.state === 'LOCKED' && !appliesMilestone) || target.state === 'NEEDS_REVIEW') {
@@ -217,6 +228,9 @@ export async function updateSiteStep(input: StepUpdateInput) {
       code: item.templateStep.code,
       answer: item.id === target.id ? input.answer : item.answer,
       state: item.state,
+      bpMilestoneOverride:
+        (item.id === target.id && isPortCheck && milestoneOrder !== undefined) ||
+        (!appliesMilestone && item.bpMilestoneOverride),
     }));
     const calculated = recalculate(definition, snapshots);
     await persistStepStates(tx, target, calculated, {
@@ -313,7 +327,12 @@ export async function reopenBranch(input: {
     const target = await lockAndLoadStep(tx, input.siteStepId);
     const definition = workflowDefinition(target);
     const milestoneOrder = activeBpMilestoneOrder(target.workflow.steps);
-    if (milestoneOrder !== undefined && target.templateStep.displayOrder < milestoneOrder) {
+    const reopensPortCheck =
+      milestoneOrder !== undefined && target.templateStep.code === PORT_CHECK_STEP_CODE;
+    if (
+      !reopensPortCheck &&
+      isCoveredByBpMilestone(milestoneOrder, target.templateStep.displayOrder)
+    ) {
       throw conflict('Reopen the BP milestone before reopening an earlier step.');
     }
     const reopensMilestone =
@@ -343,6 +362,7 @@ export async function reopenBranch(input: {
             code,
             answer: step.id === target.id ? null : step.answer,
             state: review ? 'NEEDS_REVIEW' : step.state,
+            bpMilestoneOverride: step.bpMilestoneOverride,
           };
         }),
       );
@@ -351,6 +371,23 @@ export async function reopenBranch(input: {
         comment: input.reason.trim(),
         updater: await updaterName(tx, input.actorId),
         eventTime: new Date().toISOString(),
+      });
+    } else if (reopensPortCheck) {
+      const calculated = recalculate(
+        definition,
+        target.workflow.steps.map((step) => ({
+          code: step.templateStep.code,
+          answer: step.id === target.id ? null : step.answer,
+          state: step.state,
+          bpMilestoneOverride: step.id === target.id || step.bpMilestoneOverride,
+        })),
+      );
+      nextState = calculated.steps.find((step) => step.code === PORT_CHECK_STEP_CODE)!.state;
+      await persistStepStates(tx, target, calculated, {
+        comment: input.reason.trim(),
+        updater: await updaterName(tx, input.actorId),
+        eventTime: new Date().toISOString(),
+        milestoneOrder,
       });
     } else {
       for (const item of target.workflow.steps) {

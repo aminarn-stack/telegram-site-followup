@@ -25,6 +25,7 @@ export interface StepSnapshot {
   code: string;
   answer: string | null;
   state: WorkflowState;
+  bpMilestoneOverride?: boolean;
 }
 
 const initialAnswers = [
@@ -43,6 +44,15 @@ const implementationAnswers = ['Done', 'Ongoing', 'Not Possible'] as const;
 
 export const BP_STEP_CODE = 'BP_ISSUANCE';
 export const BP_MILESTONE_ANSWER = 'Done - All previous steps considered as Done';
+export const PORT_CHECK_STEP_CODE = 'AVAILABLE_PORT';
+
+export function isCoveredByBpMilestone(
+  milestoneOrder: number | undefined,
+  stepOrder: number,
+  override?: boolean,
+): boolean {
+  return milestoneOrder !== undefined && stepOrder < milestoneOrder && !override;
+}
 
 export function activeBpMilestoneOrder(
   steps: readonly {
@@ -71,7 +81,7 @@ const step = (
 const base = [
   step('INITIAL_ACCESS', 1, 'Initial access assessment', null, 'INITIAL_ACCESS', initialAnswers),
   step('PERMISSION', 2, 'Permission', 'INITIAL_ACCESS', 'PERMISSION', permissionAnswers),
-  step('AVAILABLE_PORT', 3, 'Available port check', null, 'PORT_CHECK', okAnswers),
+  step(PORT_CHECK_STEP_CODE, 3, 'Available port check', null, 'PORT_CHECK', okAnswers),
   step('PRE_TSS', 4, 'Pre-TSS', 'PERMISSION', 'STANDARD', doneAnswers),
   step('RND_SUBMISSION', 5, 'RND submission', 'PRE_TSS', 'STANDARD', doneAnswers),
   step(
@@ -362,7 +372,10 @@ export function recalculate(
   for (const definition of template.steps) {
     const current = byCode.get(definition.code);
     if (!current) throw new Error(`Missing site step ${definition.code}`);
-    if (milestoneOrder !== undefined && definition.order <= milestoneOrder) {
+    if (
+      (milestoneOrder !== undefined && definition.code === BP_STEP_CODE) ||
+      isCoveredByBpMilestone(milestoneOrder, definition.order, current.bpMilestoneOverride)
+    ) {
       if (definition.code === BP_STEP_CODE || current.state !== 'NOT_APPLICABLE')
         current.state = 'COMPLETED';
       continue;
