@@ -259,17 +259,26 @@ export async function processNotificationQueue(config: Config) {
 }
 
 function formatNotification(type: string, payload: Record<string, unknown>, timezone: string) {
+  const eventTime =
+    typeof payload.eventTime === 'string' ? new Date(payload.eventTime) : new Date();
   const time = new Intl.DateTimeFormat('en-GB', {
     timeZone: timezone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date());
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'longOffset',
+  })
+    .format(Number.isNaN(eventTime.getTime()) ? new Date() : eventTime)
+    .replace('GMT', 'UTC');
   if (type === 'ESCALATION')
-    return `Blocked site escalation\nSite: ${payload.siteId}\nSC: ${payload.serviceCenter}\nRegion: ${payload.region}\nStep: ${payload.step}\nResult: ${payload.answer}\nComment: ${payload.comment}\nUpdated by: ${payload.updater}\nTime: ${payload.eventTime ?? time}`;
+    return `Blocked site escalation\nSite: ${payload.siteId}\nSC: ${payload.serviceCenter}\nRegion: ${payload.region}\nStep: ${payload.step}\nResult: ${payload.answer}\nComment: ${payload.comment}\nUpdated by: ${payload.updater}\nTime: ${time}`;
   if (type === 'RESOLUTION')
-    return `Blocked item resolved\nSite: ${payload.siteId}\nStep: ${payload.step}\nResult: ${payload.answer}\nUpdated by: ${payload.updater}\nTime: ${payload.eventTime ?? time}`;
+    return `Blocked item resolved\nSite: ${payload.siteId}\nStep: ${payload.step}\nResult: ${payload.answer}\nUpdated by: ${payload.updater}\nTime: ${time}`;
   if (type === 'SITE_COMPLETED')
-    return `Site implementation completed\nSite: ${payload.siteId}\nSC: ${payload.serviceCenter}\nRegion: ${payload.region}\nUpdated by: ${payload.updater}\nTime: ${payload.eventTime ?? time}`;
+    return `Site implementation completed\nSite: ${payload.siteId}\nSC: ${payload.serviceCenter}\nRegion: ${payload.region}\nUpdated by: ${payload.updater}\nTime: ${time}`;
   if (type === 'IMPORT_COMMITTED')
     return `Weekly import committed\nWeek: ${String(payload.reportingWeek).slice(0, 10)}\nAccepted: ${payload.acceptedRows}\nRejected: ${payload.rejectedRows}\nSCs: ${formatCounts(payload.serviceCenterCounts as Record<string, number>)}\nScenarios: ${formatCounts(payload.scenarioCounts as Record<string, number>)}\nRegions: ${formatCounts(payload.regionCounts as Record<string, number>)}`;
   if (type === 'REMINDER')

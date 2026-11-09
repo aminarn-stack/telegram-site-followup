@@ -20,6 +20,7 @@ vi.mock('../../src/db.js', () => ({
         serviceCenters: [{ serviceCenter: { code: 'SC-A' } }],
       })),
     },
+    notification: { findMany: vi.fn(async () => []), update: vi.fn() },
     siteWorkflow: { findMany: vi.fn(async () => []) },
   },
 }));
@@ -141,6 +142,43 @@ function telegramSession(telegramVerified = true) {
 }
 
 describe('Telegram commands and exports', () => {
+  it('sends queued workflow notifications with the event time in Tehran', async () => {
+    const { processNotificationQueue } = await import('../../src/bot.js');
+    const { loadConfig } = await import('../../src/config.js');
+    const eventTime = '2026-11-09T13:08:33.388Z';
+    const queuedAt = new Date('2026-11-09T13:09:00.000Z');
+    const types = ['ESCALATION', 'RESOLUTION', 'SITE_COMPLETED'];
+    vi.mocked(prisma.notification.findMany).mockResolvedValueOnce(
+      types.map((messageType) => ({
+        id: messageType,
+        idempotencyKey: messageType,
+        recipientChatId: -303n,
+        messageType,
+        payload: { eventTime, siteId: '001002' },
+        state: 'PENDING',
+        attempts: 0,
+        telegramMessageId: null,
+        lastError: null,
+        nextAttemptAt: queuedAt,
+        createdAt: queuedAt,
+        updatedAt: queuedAt,
+      })),
+    );
+    vi.spyOn(Api.prototype, 'getMe').mockResolvedValue(botUser);
+    const send = vi.spyOn(Api.prototype, 'sendMessage').mockImplementation(async (_id, text) => ({
+      message_id: 2,
+      date: 0,
+      chat: groupChat,
+      text,
+    }));
+
+    const config = loadConfig({ ...process.env, APP_TIMEZONE: 'Asia/Tehran' });
+    expect(await processNotificationQueue(config)).toEqual({ processed: types.length });
+    expect(send.mock.calls.map(([, message]) => message.split('\n').at(-1))).toEqual(
+      types.map(() => 'Time: 9 Nov 2026, 16:38:33 UTC+03:30'),
+    );
+  });
+
   it('initializes the webhook bot and uses the right keyboard for each chat', async () => {
     const getMe = vi.spyOn(Api.prototype, 'getMe').mockResolvedValue(botUser);
     const send = vi.spyOn(Api.prototype, 'sendMessage').mockImplementation(async (id, text) => ({
