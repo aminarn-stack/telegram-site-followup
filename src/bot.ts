@@ -115,7 +115,28 @@ export function createBot(config: Config) {
     const scope = await commandScope(ctx);
     if ('error' in scope) return ctx.reply(scope.error);
     return ctx.reply(
-      '/open opens the app. /summary, /remind, /export, /flowexport, and /pending use this group’s assigned SC scope. /flowexport lists every site with its current and next steps. /pending sends the open steps and wait times for MTNI and Contractor. Administrators can run exports in a private chat for the all-SC view.',
+      '/open opens the app. /guide sends the user guide. /summary, /remind, /export, /flowexport, and /pending use this group’s assigned SC scope. /flowexport lists every site with its current and next steps. /pending sends the open steps and wait times for MTNI and Contractor.',
+    );
+  });
+  bot.command('guide', async (ctx) => {
+    const scope = await commandScope(ctx);
+    if ('error' in scope) return ctx.reply(scope.error);
+    const guideUrl = new URL(
+      'https://github.com/aminarn-stack/telegram-site-followup/blob/main/docs/how-to-use.md',
+    ).toString();
+    return ctx.reply(
+      [
+        'User guide — راهنمای کاربران',
+        '',
+        'English: Open the Mini App with /open. Find a site by Site ID or filters, open it, complete the next unlocked step, choose the appropriate answer, add a comment when requested, attach evidence (JPEG, PNG, WebP, or PDF), and save. Locked steps require their prerequisites to be completed.',
+        '',
+        'فارسی: با دستور /open مینی‌اپ را باز کنید. سایت را با شناسه Site ID یا فیلترها پیدا کنید، مرحله بعدیِ باز را انجام دهید، پاسخ مناسب را انتخاب کنید، در صورت نیاز توضیح و مدرک (JPEG، PNG، WebP یا PDF) اضافه کنید و تغییرات را ذخیره کنید. برای انجام مراحل قفل‌شده ابتدا باید پیش‌نیازها تکمیل شوند.',
+        '',
+        'Commands / دستورات: /start, /open, /summary, /remind, /export, /flowexport, /pending, /help',
+        '',
+        `Full guide / راهنمای کامل: ${guideUrl}`,
+      ].join('\\n'),
+      { reply_markup: commandKeyboard(ctx, config) },
     );
   });
   bot.command('summary', async (ctx) => {
