@@ -122,8 +122,7 @@ export function createBot(config: Config) {
     const scope = await commandScope(ctx);
     if ('error' in scope) return ctx.reply(scope.error);
     const guideUrl = new URL(
-      '/docs/how-to-use.md',
-      config.PUBLIC_BASE_URL,
+      'https://github.com/aminarn-stack/telegram-site-followup/blob/main/docs/how-to-use.md',
     ).toString();
     return ctx.reply(
       [
