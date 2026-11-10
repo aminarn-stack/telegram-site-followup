@@ -48,6 +48,7 @@ await telegram('setMyCommands', {
     { command: 'flowexport', description: 'Export current and next steps' },
     { command: 'pending', description: 'Report MTNI and Contractor pending cases' },
     { command: 'help', description: 'Show available commands' },
+    { command: 'guide', description: 'Get the bilingual user guide' },
   ],
 });
 
