@@ -65,6 +65,8 @@ Step update body:
 | ------ | ---- | ------ | ------- |
 | POST | `/api/admin/users/:userId/revoke` | Admin | Disable a person's account immediately while retaining assignments and history. |
 | POST | `/api/admin/chats/:chatId/revoke` | Admin | Disable a Telegram group's access immediately while retaining its SC mapping and settings. |
+| POST | `/api/admin/users/:userId/restore` | Admin | Restore a previously disabled person's account. |
+| POST | `/api/admin/chats/:chatId/restore` | Admin | Restore a previously disabled Telegram group. |
 
 Both endpoints require a JSON body with a mandatory reason:
 
@@ -82,8 +84,9 @@ Revocation is recorded in the immutable audit log as `USER_ACCESS_REVOKED` or
 PostgreSQL rather than trusting permissions cached in an existing JWT, so an existing session is
 denied on its next API request. Telegram commands check the live active user and group records.
 The notification worker suppresses queued messages for a disabled or unconfigured group.
-Re-enabling is an explicit administrator action through the existing user/group administration
-upsert endpoints; revocation does not delete users, groups, assignments, or historical records.
+Restoration is an explicit administrator action through the corresponding `/restore` endpoint and
+also requires a reason; restoration is recorded as `USER_ACCESS_RESTORED` or
+`GROUP_ACCESS_RESTORED`. Revocation does not delete users, groups, assignments, or historical records.
 
 ## Filtering
 
