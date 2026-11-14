@@ -805,6 +805,13 @@ function Batches() {
 function Admin() {
   const queryClient = useQueryClient();
   const [archiveResult, setArchiveResult] = useState<string>();
+  const [accessAction, setAccessAction] = useState<{
+    kind: 'user' | 'group';
+    id: string;
+    name: string;
+    restore: boolean;
+  } | null>(null);
+  const [accessReason, setAccessReason] = useState('');
   const { data: users } = useApiQuery<
     {
       id: string;
@@ -850,6 +857,8 @@ function Admin() {
         body: JSON.stringify({ reason }),
       }),
     onSuccess: async () => {
+      setAccessAction(null);
+      setAccessReason('');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['users'] }),
         queryClient.invalidateQueries({ queryKey: ['chats'] }),
@@ -966,10 +975,8 @@ function Admin() {
                 className="destructive"
                 disabled={changeAccess.isPending}
                 onClick={() => {
-                  const reason = window.prompt(`Reason for revoking access for ${user.firstName}`);
-                  if (!reason?.trim()) return;
-                  if (!window.confirm(`Revoke ${user.firstName}'s access immediately?`)) return;
-                  changeAccess.mutate({ path: `/api/admin/users/${user.id}/revoke`, reason: reason.trim() });
+                  setAccessReason('');
+                  setAccessAction({ kind: 'user', id: user.id, name: user.firstName, restore: false });
                 }}
               >
                 Revoke access
@@ -979,8 +986,8 @@ function Admin() {
                 className="secondary"
                 disabled={changeAccess.isPending}
                 onClick={() => {
-                  const reason = window.prompt(`Reason for restoring access for ${user.firstName}`);
-                  if (reason?.trim()) changeAccess.mutate({ path: `/api/admin/users/${user.id}/restore`, reason: reason.trim() });
+                  setAccessReason('');
+                  setAccessAction({ kind: 'user', id: user.id, name: user.firstName, restore: true });
                 }}
               >
                 Restore access
@@ -1052,10 +1059,8 @@ function Admin() {
                 disabled={changeAccess.isPending}
                 onClick={() => {
                   const name = chat.groupName || chat.telegramChatId;
-                  const reason = window.prompt(`Reason for revoking access for group ${name}`);
-                  if (!reason?.trim()) return;
-                  if (!window.confirm(`Disable bot access and group notifications for ${name}?`)) return;
-                  changeAccess.mutate({ path: `/api/admin/chats/${chat.id}/revoke`, reason: reason.trim() });
+                  setAccessReason('');
+                  setAccessAction({ kind: 'group', id: chat.id, name, restore: false });
                 }}
               >
                 Revoke access
@@ -1066,8 +1071,8 @@ function Admin() {
                 disabled={changeAccess.isPending}
                 onClick={() => {
                   const name = chat.groupName || chat.telegramChatId;
-                  const reason = window.prompt(`Reason for restoring access for group ${name}`);
-                  if (reason?.trim()) changeAccess.mutate({ path: `/api/admin/chats/${chat.id}/restore`, reason: reason.trim() });
+                  setAccessReason('');
+                  setAccessAction({ kind: 'group', id: chat.id, name, restore: true });
                 }}
               >
                 Restore access
@@ -1099,6 +1104,60 @@ function Admin() {
           </article>
         ))}
       </div>
+      {accessAction && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setAccessAction(null)}>
+          <section
+            className="modal access-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="access-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="access-dialog-title">
+              {accessAction.restore ? 'Restore access' : 'Revoke access'}
+            </h2>
+            <p>
+              {accessAction.restore
+                ? `Restore ${accessAction.kind === 'user' ? 'account' : 'Telegram group'} access for ${accessAction.name}?`
+                : accessAction.kind === 'user'
+                  ? `This will immediately block ${accessAction.name} from using the Mini App.`
+                  : `This will stop ${accessAction.name} from using the bot and receiving group notifications.`}
+            </p>
+            <label>
+              Reason (required)
+              <textarea
+                autoFocus
+                maxLength={500}
+                value={accessReason}
+                onChange={(event) => setAccessReason(event.target.value)}
+                placeholder={accessAction.restore ? 'Why should access be restored?' : 'Why is access being revoked?'}
+              />
+            </label>
+            <div className="actions">
+              <button className="secondary" onClick={() => setAccessAction(null)}>
+                Cancel
+              </button>
+              <button
+                className={accessAction.restore ? '' : 'destructive'}
+                disabled={accessReason.trim().length < 3 || changeAccess.isPending}
+                onClick={() =>
+                  changeAccess.mutate({
+                    path: `/api/admin/${accessAction.kind === 'user' ? 'users' : 'chats'}/${accessAction.id}/${accessAction.restore ? 'restore' : 'revoke'}`,
+                    reason: accessReason.trim(),
+                  })
+                }
+              >
+                {changeAccess.isPending
+                  ? 'Saving…'
+                  : accessAction.restore
+                    ? 'Restore access'
+                    : 'Confirm revocation'}
+              </button>
+            </div>
+            {changeAccess.error && <p className="danger" role="alert">{changeAccess.error.message}</p>}
+          </section>
+        </div>
+      )}
     </section>
   );
 }
