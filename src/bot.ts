@@ -245,12 +245,29 @@ export async function processNotificationQueue(config: Config) {
       data: { state: 'PROCESSING', attempts: { increment: 1 } },
     });
     try {
+      const isGroup = notification.recipientChatId < 0n;
+      if (isGroup) {
+        const recipientGroup = await prisma.botChat.findUnique({
+          where: { telegramChatId: notification.recipientChatId },
+          select: { active: true },
+        });
+        if (!recipientGroup?.active) {
+          await prisma.notification.update({
+            where: { id: notification.id },
+            data: {
+              state: 'FAILED',
+              attempts: 5,
+              lastError: 'Delivery suppressed: Telegram group access is revoked or unconfigured.',
+            },
+          });
+          continue;
+        }
+      }
       const payload = notification.payload as Record<string, unknown>;
       const text = formatNotification(notification.messageType, payload, config.APP_TIMEZONE);
       const startParam = payload.deepLinkTarget
         ? await createDeepLink(payload.deepLinkTarget as Record<string, unknown>)
         : undefined;
-      const isGroup = notification.recipientChatId < 0n;
       if (isGroup) await bot.init();
       const result = await bot.api.sendMessage(notification.recipientChatId.toString(), text, {
         reply_markup: isGroup
