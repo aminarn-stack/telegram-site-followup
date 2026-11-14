@@ -113,6 +113,28 @@ export async function adminRoutes(app: FastifyInstance) {
     });
   });
 
+  app.post('/api/admin/users/:userId/restore', async (request) => {
+    const actor = await actorFrom(request);
+    requireRole(actor, [Role.ADMIN]);
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
+    const { reason } = z.object({ reason: z.string().trim().min(3).max(500) }).parse(request.body);
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.user.findUnique({ where: { id: userId } });
+      if (!target) throw notFound('User not found.');
+      if (target.active) return { success: true, alreadyActive: true };
+      await tx.user.update({ where: { id: userId }, data: { active: true } });
+      await tx.auditEvent.create({
+        data: {
+          actorId: actor.id, entityType: 'user', entityId: userId,
+          action: 'USER_ACCESS_RESTORED',
+          oldValue: { active: false }, newValue: { active: true },
+          reason, requestId: request.id,
+        },
+      });
+      return { success: true, alreadyActive: false };
+    });
+  });
+
   app.get('/api/admin/regions', async (request) => {
     const actor = await actorFrom(request);
     requireRole(actor, [Role.ADMIN]);
@@ -220,6 +242,28 @@ export async function adminRoutes(app: FastifyInstance) {
         },
       });
       return { success: true, alreadyRevoked: false };
+    });
+  });
+
+  app.post('/api/admin/chats/:chatId/restore', async (request) => {
+    const actor = await actorFrom(request);
+    requireRole(actor, [Role.ADMIN]);
+    const { chatId } = z.object({ chatId: z.string().uuid() }).parse(request.params);
+    const { reason } = z.object({ reason: z.string().trim().min(3).max(500) }).parse(request.body);
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.botChat.findUnique({ where: { id: chatId } });
+      if (!target) throw notFound('Telegram group not found.');
+      if (target.active) return { success: true, alreadyActive: true };
+      await tx.botChat.update({ where: { id: chatId }, data: { active: true } });
+      await tx.auditEvent.create({
+        data: {
+          actorId: actor.id, entityType: 'bot_chat', entityId: chatId,
+          action: 'GROUP_ACCESS_RESTORED',
+          oldValue: { active: false, telegramChatId: target.telegramChatId.toString() },
+          newValue: { active: true }, reason, requestId: request.id,
+        },
+      });
+      return { success: true, alreadyActive: false };
     });
   });
 
