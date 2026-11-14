@@ -546,3 +546,12 @@ label {
     flex-direction: column;
   }
 }
+
+.access-modal > p {
+  margin: 0;
+  color: var(--muted);
+}
+.access-modal .actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
