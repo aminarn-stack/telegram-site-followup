@@ -820,6 +820,7 @@ function Admin() {
       id: string;
       telegramChatId: string;
       groupName?: string;
+      active: boolean;
       timezone: string;
       reminderSchedule: string;
       serviceCenters: { serviceCenter: { code: string } }[];
@@ -841,6 +842,21 @@ function Admin() {
     mutationFn: (body: Record<string, unknown>) =>
       api('/api/admin/chats', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chats'] }),
+  });
+  const changeAccess = useMutation({
+    mutationFn: ({ path, reason }: { path: string; reason: string }) =>
+      api<{ success: boolean; alreadyRevoked?: boolean; alreadyActive?: boolean }>(path, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['users'] }),
+        queryClient.invalidateQueries({ queryKey: ['chats'] }),
+      ]);
+      window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success');
+    },
+    onError: () => window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('error'),
   });
   const cloneTemplate = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
@@ -935,19 +951,45 @@ function Admin() {
       </form>
       <div className="card-list">
         {users?.map((user) => (
-          <article className="card" key={user.id}>
+          <article className="card access-card" key={user.id}>
             <div>
               <strong>{user.firstName}</strong>
               <small>
-                {user.telegramUserId} ·{' '}
+                {user.telegramUserId} · {user.role} ·{' '}
                 {user.serviceCenters.map((item) => item.serviceCenter.code).join(', ') ||
                   'No SC access'}
               </small>
+              <Status value={user.active ? 'ACTIVE' : 'REVOKED'} />
             </div>
-            <Status value={user.active ? user.role : 'INACTIVE'} />
+            {user.active ? (
+              <button
+                className="destructive"
+                disabled={changeAccess.isPending}
+                onClick={() => {
+                  const reason = window.prompt(`Reason for revoking access for ${user.firstName}`);
+                  if (!reason?.trim()) return;
+                  if (!window.confirm(`Revoke ${user.firstName}'s access immediately?`)) return;
+                  changeAccess.mutate({ path: `/api/admin/users/${user.id}/revoke`, reason: reason.trim() });
+                }}
+              >
+                Revoke access
+              </button>
+            ) : (
+              <button
+                className="secondary"
+                disabled={changeAccess.isPending}
+                onClick={() => {
+                  const reason = window.prompt(`Reason for restoring access for ${user.firstName}`);
+                  if (reason?.trim()) changeAccess.mutate({ path: `/api/admin/users/${user.id}/restore`, reason: reason.trim() });
+                }}
+              >
+                Restore access
+              </button>
+            )}
           </article>
         ))}
       </div>
+      {changeAccess.error && <p className="danger" role="alert">{changeAccess.error.message}</p>}
       <h2>Telegram groups and reminders</h2>
       <form
         className="panel form-grid"
@@ -993,18 +1035,48 @@ function Admin() {
       </form>
       <div className="card-list">
         {chats?.map((chat) => (
-          <article className="card" key={chat.id}>
+          <article className="card access-card" key={chat.id}>
             <div>
               <strong>{chat.groupName || chat.telegramChatId}</strong>
               <small>
+                Telegram ID: {chat.telegramChatId} ·{' '}
                 {chat.serviceCenters.map((item) => item.serviceCenter.code).join(', ') ||
                   'No SC assigned'}{' '}
                 · {chat.timezone} · {chat.reminderSchedule}
               </small>
+              <Status value={chat.active ? 'ACTIVE' : 'REVOKED'} />
             </div>
+            {chat.active ? (
+              <button
+                className="destructive"
+                disabled={changeAccess.isPending}
+                onClick={() => {
+                  const name = chat.groupName || chat.telegramChatId;
+                  const reason = window.prompt(`Reason for revoking access for group ${name}`);
+                  if (!reason?.trim()) return;
+                  if (!window.confirm(`Disable bot access and group notifications for ${name}?`)) return;
+                  changeAccess.mutate({ path: `/api/admin/chats/${chat.id}/revoke`, reason: reason.trim() });
+                }}
+              >
+                Revoke access
+              </button>
+            ) : (
+              <button
+                className="secondary"
+                disabled={changeAccess.isPending}
+                onClick={() => {
+                  const name = chat.groupName || chat.telegramChatId;
+                  const reason = window.prompt(`Reason for restoring access for group ${name}`);
+                  if (reason?.trim()) changeAccess.mutate({ path: `/api/admin/chats/${chat.id}/restore`, reason: reason.trim() });
+                }}
+              >
+                Restore access
+              </button>
+            )}
           </article>
         ))}
       </div>
+      {changeAccess.error && <p className="danger" role="alert">{changeAccess.error.message}</p>}
       <h2>Workflow template versions</h2>
       <div className="card-list">
         {templates?.map((template) => (
