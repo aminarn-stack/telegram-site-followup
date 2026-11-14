@@ -36,6 +36,13 @@ export async function adminRoutes(app: FastifyInstance) {
         serviceCenters: z.array(z.string().min(1).max(50)).default([]),
       })
       .parse(request.body);
+    const existingUser = await prisma.user.findUnique({
+      where: { telegramUserId: BigInt(body.telegramUserId) },
+      select: { active: true },
+    });
+    if (existingUser && !existingUser.active && body.active) {
+      throw validation('This account is revoked. Use the audited restore access action instead.');
+    }
     const serviceCenters = await findExistingServiceCenters(body.serviceCenters);
     const user = await prisma.user.upsert({
       where: { telegramUserId: BigInt(body.telegramUserId) },
@@ -86,6 +93,55 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ...user, telegramUserId: user.telegramUserId.toString() };
   });
 
+  // Disable a person without deleting their identity, assignments, or audit history.
+  // actorFrom() reloads active status and grants on every request, invalidating
+  // already-issued JWT sessions immediately after this transaction commits.
+  app.post('/api/admin/users/:userId/revoke', async (request) => {
+    const actor = await actorFrom(request);
+    requireRole(actor, [Role.ADMIN]);
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
+    const { reason } = z.object({ reason: z.string().trim().min(3).max(500) }).parse(request.body);
+    if (userId === actor.id) throw validation('You cannot revoke your own administrator access.');
+
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.user.findUnique({ where: { id: userId } });
+      if (!target) throw notFound('User not found.');
+      if (!target.active) return { success: true, alreadyRevoked: true };
+      await tx.user.update({ where: { id: userId }, data: { active: false } });
+      await tx.auditEvent.create({
+        data: {
+          actorId: actor.id, entityType: 'user', entityId: userId,
+          action: 'USER_ACCESS_REVOKED',
+          oldValue: { active: true }, newValue: { active: false },
+          reason, requestId: request.id,
+        },
+      });
+      return { success: true, alreadyRevoked: false };
+    });
+  });
+
+  app.post('/api/admin/users/:userId/restore', async (request) => {
+    const actor = await actorFrom(request);
+    requireRole(actor, [Role.ADMIN]);
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
+    const { reason } = z.object({ reason: z.string().trim().min(3).max(500) }).parse(request.body);
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.user.findUnique({ where: { id: userId } });
+      if (!target) throw notFound('User not found.');
+      if (target.active) return { success: true, alreadyActive: true };
+      await tx.user.update({ where: { id: userId }, data: { active: true } });
+      await tx.auditEvent.create({
+        data: {
+          actorId: actor.id, entityType: 'user', entityId: userId,
+          action: 'USER_ACCESS_RESTORED',
+          oldValue: { active: false }, newValue: { active: true },
+          reason, requestId: request.id,
+        },
+      });
+      return { success: true, alreadyActive: false };
+    });
+  });
+
   app.get('/api/admin/regions', async (request) => {
     const actor = await actorFrom(request);
     requireRole(actor, [Role.ADMIN]);
@@ -128,6 +184,13 @@ export async function adminRoutes(app: FastifyInstance) {
         serviceCenters: z.array(z.string().min(1).max(50)).min(1),
       })
       .parse(request.body);
+    const existingChat = await prisma.botChat.findUnique({
+      where: { telegramChatId: BigInt(body.telegramChatId) },
+      select: { active: true },
+    });
+    if (existingChat && !existingChat.active && body.active) {
+      throw validation('This group is revoked. Use the audited restore access action instead.');
+    }
     const serviceCenters = await findExistingServiceCenters(body.serviceCenters);
     const data = {
       telegramChatId: BigInt(body.telegramChatId),
@@ -171,6 +234,51 @@ export async function adminRoutes(app: FastifyInstance) {
       },
     });
     return { ...chat, telegramChatId: chat.telegramChatId.toString() };
+  });
+
+  // Disable a Telegram group while retaining its SC mapping and settings.
+  app.post('/api/admin/chats/:chatId/revoke', async (request) => {
+    const actor = await actorFrom(request);
+    requireRole(actor, [Role.ADMIN]);
+    const { chatId } = z.object({ chatId: z.string().uuid() }).parse(request.params);
+    const { reason } = z.object({ reason: z.string().trim().min(3).max(500) }).parse(request.body);
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.botChat.findUnique({ where: { id: chatId } });
+      if (!target) throw notFound('Telegram group not found.');
+      if (!target.active) return { success: true, alreadyRevoked: true };
+      await tx.botChat.update({ where: { id: chatId }, data: { active: false } });
+      await tx.auditEvent.create({
+        data: {
+          actorId: actor.id, entityType: 'bot_chat', entityId: chatId,
+          action: 'GROUP_ACCESS_REVOKED',
+          oldValue: { active: true, telegramChatId: target.telegramChatId.toString() },
+          newValue: { active: false }, reason, requestId: request.id,
+        },
+      });
+      return { success: true, alreadyRevoked: false };
+    });
+  });
+
+  app.post('/api/admin/chats/:chatId/restore', async (request) => {
+    const actor = await actorFrom(request);
+    requireRole(actor, [Role.ADMIN]);
+    const { chatId } = z.object({ chatId: z.string().uuid() }).parse(request.params);
+    const { reason } = z.object({ reason: z.string().trim().min(3).max(500) }).parse(request.body);
+    return prisma.$transaction(async (tx) => {
+      const target = await tx.botChat.findUnique({ where: { id: chatId } });
+      if (!target) throw notFound('Telegram group not found.');
+      if (target.active) return { success: true, alreadyActive: true };
+      await tx.botChat.update({ where: { id: chatId }, data: { active: true } });
+      await tx.auditEvent.create({
+        data: {
+          actorId: actor.id, entityType: 'bot_chat', entityId: chatId,
+          action: 'GROUP_ACCESS_RESTORED',
+          oldValue: { active: false, telegramChatId: target.telegramChatId.toString() },
+          newValue: { active: true }, reason, requestId: request.id,
+        },
+      });
+      return { success: true, alreadyActive: false };
+    });
   });
 
   app.post('/api/admin/plans/archive', async (request) => {

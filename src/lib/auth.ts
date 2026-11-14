@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 import type { Role } from '@prisma/client';
+import { prisma } from '../db.js';
 import { forbidden, unauthorized } from './errors.js';
 
 export interface Actor {
@@ -10,18 +11,33 @@ export interface Actor {
   serviceCenters: string[];
 }
 
+/** Treat JWTs as identity proofs; reload live grants so revocation is immediate. */
 export async function actorFrom(request: FastifyRequest): Promise<Actor> {
   try {
     await request.jwtVerify();
   } catch {
     throw unauthorized();
   }
+
+  const userId = request.user.sub;
+  if (!userId) throw unauthorized();
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      regions: { include: { region: true } },
+      serviceCenters: { include: { serviceCenter: true } },
+    },
+  });
+  if (!user?.active) throw forbidden('Your account access has been revoked or disabled.');
+
   return {
-    id: request.user.sub,
-    telegramUserId: request.user.telegramUserId,
-    role: request.user.role,
-    regions: request.user.regions,
-    serviceCenters: request.user.serviceCenters,
+    id: user.id,
+    telegramUserId: user.telegramUserId.toString(),
+    role: user.role,
+    regions: user.regions.filter((item) => item.region.active).map((item) => item.region.code),
+    serviceCenters: user.serviceCenters
+      .filter((item) => item.serviceCenter.active)
+      .map((item) => item.serviceCenter.code),
   };
 }
 

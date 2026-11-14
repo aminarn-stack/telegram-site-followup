@@ -59,6 +59,35 @@ Step update body:
 | POST     | `/api/admin/templates/:templateId/clone`    | Admin      | Create the next validated active version without rewriting history.          |
 | POST     | `/api/admin/plans/archive`                  | Admin      | Archive active weekly workflows and clear the dashboard for the next import. |
 
+## Access revocation
+
+| Method | Path | Access | Purpose |
+| ------ | ---- | ------ | ------- |
+| POST | `/api/admin/users/:userId/revoke` | Admin | Disable a person's account immediately while retaining assignments and history. |
+| POST | `/api/admin/chats/:chatId/revoke` | Admin | Disable a Telegram group's access immediately while retaining its SC mapping and settings. |
+| POST | `/api/admin/users/:userId/restore` | Admin | Restore a previously disabled person's account. |
+| POST | `/api/admin/chats/:chatId/restore` | Admin | Restore a previously disabled Telegram group. |
+
+All four endpoints require a JSON body with a mandatory reason:
+
+```json
+{ "reason": "Access no longer required" }
+```
+
+The `userId` and `chatId` path parameters are the internal UUIDs returned by
+`GET /api/admin/users` and `GET /api/admin/chats`, respectively. A successful response is
+`{ "success": true, "alreadyRevoked": false }`; repeating a revocation is safe and returns
+`alreadyRevoked: true`. An administrator cannot revoke their own account through this endpoint.
+
+Revocation is recorded in the immutable audit log as `USER_ACCESS_REVOKED` or
+`GROUP_ACCESS_REVOKED`. User API requests reload the active account and current SC grants from
+PostgreSQL rather than trusting permissions cached in an existing JWT, so an existing session is
+denied on its next API request. Telegram commands check the live active user and group records.
+The notification worker suppresses queued messages for a disabled or unconfigured group.
+Restoration is an explicit administrator action through the corresponding `/restore` endpoint and
+also requires a reason; restoration is recorded as `USER_ACCESS_RESTORED` or
+`GROUP_ACCESS_RESTORED`. Revocation does not delete users, groups, assignments, or historical records.
+
 ## Filtering
 
 `GET /api/sites` accepts `week`, `region`, `siteType`, `sectorAddition`, `status`, `assignedUser`, `search`, `page`, and `pageSize`. `GET /api/audit` accepts `entityType`, `entityId`, `actorId`, `from`, `to`, and `page`.
