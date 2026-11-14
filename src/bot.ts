@@ -40,10 +40,11 @@ async function authorizedUser(telegramUserId?: number) {
 
 async function configuredChat(telegramChatId: number | undefined, chatType?: string) {
   if (!telegramChatId || chatType === 'private') return null;
-  return prisma.botChat.findUnique({
+  const chat = await prisma.botChat.findUnique({
     where: { telegramChatId: BigInt(telegramChatId) },
     include: { serviceCenters: { include: { serviceCenter: true } } },
   });
+  return chat?.active ? chat : null;
 }
 
 function effectiveServiceCenters(
