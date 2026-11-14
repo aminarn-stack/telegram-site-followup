@@ -36,6 +36,13 @@ export async function adminRoutes(app: FastifyInstance) {
         serviceCenters: z.array(z.string().min(1).max(50)).default([]),
       })
       .parse(request.body);
+    const existingUser = await prisma.user.findUnique({
+      where: { telegramUserId: BigInt(body.telegramUserId) },
+      select: { active: true },
+    });
+    if (existingUser && !existingUser.active && body.active) {
+      throw validation('This account is revoked. Use the audited restore access action instead.');
+    }
     const serviceCenters = await findExistingServiceCenters(body.serviceCenters);
     const user = await prisma.user.upsert({
       where: { telegramUserId: BigInt(body.telegramUserId) },
@@ -177,6 +184,13 @@ export async function adminRoutes(app: FastifyInstance) {
         serviceCenters: z.array(z.string().min(1).max(50)).min(1),
       })
       .parse(request.body);
+    const existingChat = await prisma.botChat.findUnique({
+      where: { telegramChatId: BigInt(body.telegramChatId) },
+      select: { active: true },
+    });
+    if (existingChat && !existingChat.active && body.active) {
+      throw validation('This group is revoked. Use the audited restore access action instead.');
+    }
     const serviceCenters = await findExistingServiceCenters(body.serviceCenters);
     const data = {
       telegramChatId: BigInt(body.telegramChatId),
