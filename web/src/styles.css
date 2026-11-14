@@ -518,3 +518,31 @@ label {
     transition: none !important;
   }
 }
+
+.access-card {
+  align-items: center;
+}
+.access-card > div {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.access-card button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.status-revoked,
+.status-inactive {
+  color: #ad2d2d;
+  background: #fdeaea;
+}
+.status-active {
+  color: #147249;
+  background: #e4f4eb;
+}
+@media (max-width: 520px) {
+  .access-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
