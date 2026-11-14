@@ -68,7 +68,7 @@ Step update body:
 | POST | `/api/admin/users/:userId/restore` | Admin | Restore a previously disabled person's account. |
 | POST | `/api/admin/chats/:chatId/restore` | Admin | Restore a previously disabled Telegram group. |
 
-Both endpoints require a JSON body with a mandatory reason:
+All four endpoints require a JSON body with a mandatory reason:
 
 ```json
 { "reason": "Access no longer required" }
